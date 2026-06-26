@@ -1,0 +1,313 @@
+@import "tailwindcss";
+
+/* ==========================================
+   LIGHT THEME
+========================================== */
+
+:root {
+  /* Brand */
+  --primary: #50d11d;
+  --primary-hover: #1d4ed8;
+  --primary-foreground: #ffffff;
+
+  /* Backgrounds */
+  --background: #ffffff;
+  --surface: #ffffff;
+  --sidebar: #ffffff;
+
+  /* Text */
+  --foreground: #0f172a;
+  --muted-foreground: #64748b;
+
+  /* Borders */
+  --border: #e2e8f0;
+
+  /* States */
+  --hover: #f1f5f9;
+
+  /* Status Colors */
+  --success: #16a34a;
+  --success-bg: #dcfce7;
+
+  --warning: #d97706;
+  --warning-bg: #fef3c7;
+
+  --danger: #dc2626;
+  --danger-bg: #fee2e2;
+
+  --info: #2563eb;
+  --info-bg: #dbeafe;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 1px 3px rgb(0 0 0 / 0.1);
+}
+
+/* ==========================================
+   DARK THEME
+========================================== */
+
+.dark {
+  /* Brand */
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-foreground: #ffffff;
+
+  /* Backgrounds */
+  --background: #020617;
+  --surface: #0f172a;
+  --sidebar: #0f172a;
+
+  /* Text */
+  --foreground: #f8fafc;
+  --muted-foreground: #94a3b8;
+
+  /* Borders */
+  --border: #1e293b;
+
+  /* States */
+  --hover: #1e293b;
+
+  /* Status Colors */
+  --success: #22c55e;
+  --success-bg: rgb(34 197 94 / 0.15);
+
+  --warning: #f59e0b;
+  --warning-bg: rgb(245 158 11 / 0.15);
+
+  --danger: #ef4444;
+  --danger-bg: rgb(239 68 68 / 0.15);
+
+  --info: #60a5fa;
+  --info-bg: rgb(96 165 250 / 0.15);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.2);
+  --shadow-md: 0 2px 6px rgb(0 0 0 / 0.3);
+}
+
+/* ==========================================
+   BASE STYLES
+========================================== */
+
+* {
+  box-sizing: border-box;
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+}
+
+/* ==========================================
+   REUSABLE COMPONENT CLASSES
+========================================== */
+
+/* Card */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Sidebar */
+
+.sidebar {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+
+  padding: 0.75rem 1rem;
+
+  border-radius: 10px;
+
+  color: var(--muted-foreground);
+
+  transition: all 0.2s ease;
+}
+
+.sidebar-item:hover {
+  background: var(--hover);
+  color: var(--foreground);
+}
+
+.sidebar-item.active {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Inputs */
+
+.input {
+  width: 100%;
+  height: 44px;
+
+  background: var(--surface);
+
+  border: 1px solid var(--border);
+
+  border-radius: 10px;
+
+  padding: 0 1rem;
+
+  outline: none;
+
+  transition: all 0.2s ease;
+}
+
+.input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+
+/* Buttons */
+
+.btn-primary {
+  height: 44px;
+
+  padding: 0 1rem;
+
+  border-radius: 10px;
+
+  background: var(--primary);
+
+  color: var(--primary-foreground);
+
+  font-weight: 500;
+
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-secondary {
+  height: 44px;
+
+  padding: 0 1rem;
+
+  border: 1px solid var(--border);
+
+  border-radius: 10px;
+
+  background: var(--surface);
+
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--hover);
+}
+
+/* Tables */
+
+.table-container {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+
+  padding: 1rem;
+
+  color: var(--muted-foreground);
+
+  font-size: 0.875rem;
+  font-weight: 600;
+
+  border-bottom: 1px solid var(--border);
+}
+
+.table td {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.table tbody tr:hover {
+  background: var(--hover);
+}
+
+/* Badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+
+  padding: 0.25rem 0.75rem;
+
+  border-radius: 9999px;
+
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge-success {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.badge-warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.badge-danger {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.badge-info {
+  color: var(--info);
+  background: var(--info-bg);
+}
+
+/* ==========================================
+   SCROLLBAR
+========================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* ==========================================
+   TEXT SELECTION
+========================================== */
+
+::selection {
+  background: var(--primary);
+  color: white;
+}
