@@ -11,3 +11,330 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Region {
+  ADDIS_ABABA
+  OROMIA
+  AMHARA
+  TIGRAY
+  SNNPR
+  AFAR
+  SOMALI
+  BENISHANGUL_GUMUZ
+  GAMBELA
+  HARARI
+  DIRE_DAWA
+  SIDAMA
+}
+
+enum RoadType {
+  ASPHALT
+  GRAVEL
+  MIXED
+}
+
+enum EmployeeRole {
+  SUPERVISOR
+  TICKETER
+  CASHIER
+}
+
+enum Sex {
+  MALE
+  FEMALE
+}
+
+enum PosStatus {
+  ACTIVE
+  IDLE
+  MAINTENANCE
+  DECOMMISSIONED
+}
+
+enum DeliveryMethod {
+  BANK_TRANSFER
+  CHEQUE
+  TELEBIRR
+  OTHER
+}
+
+enum BusType {
+  BUS
+  MIDBUS
+  MINIBUS
+}
+
+enum BusLevel {
+  LEVEL_1
+  LEVEL_2
+  LEVEL_3
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Station {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. "STN-001" — human-readable code
+  name      String
+  region    Region
+  zone      String
+  location  String   // street / landmark description
+
+  // Soft delete
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  terminalsAsOrigin  Terminal[] @relation("OriginStation")   // terminals that list THIS station as their home
+  terminalsAsTarget  Terminal[] @relation("TargetStation")   // when terminal points to another station
+  employees          Employee[]
+  posMachines        PosMachine[]
+
+  @@index([isDeleted])
+  @@index([region])
+  @@map("stations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TERMINAL
+// A terminal belongs to one Station (origin).
+// It may optionally reference another Station (when isLinkedStation = true).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Terminal {
+  id               String   @id @default(cuid())
+
+  // Which station owns this terminal entry
+  stationId        String
+  station          Station  @relation("OriginStation", fields: [stationId], references: [id])
+
+  // Display name — either custom text or mirrors the linked station's name
+  name             String
+
+  // When this terminal IS another station in the system
+  isLinkedStation  Boolean  @default(false)
+  linkedStationId  String?
+  linkedStation    Station? @relation("TargetStation", fields: [linkedStationId], references: [id])
+
+  // Direction flags
+  isDeparture      Boolean  @default(false)
+  isArrival        Boolean  @default(true)
+
+  // Distance & road
+  distanceKm       Decimal  @db.Decimal(8, 2)  // total km
+  roadType         RoadType
+
+  // Only populated when roadType = MIXED
+  asphaltKm        Decimal? @db.Decimal(8, 2)
+  gravelKm         Decimal? @db.Decimal(8, 2)
+
+  // Soft delete
+  isDeleted        Boolean  @default(false)
+  deletedAt        DateTime?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([stationId, isDeleted])
+  @@index([linkedStationId])
+  @@map("terminals")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMPLOYEE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Employee {
+  id             String      @id @default(cuid())
+  code           String      @unique // e.g. "EMP-001"
+
+  // Name
+  firstName      String
+  middleName     String?
+  lastName       String
+
+  // Contact
+  phone          String      @unique
+  email          String?     @unique
+
+  // POS machine login — stored as plain text per admin requirement
+  posPassword    String?
+
+  // Fayda Alias Number — 16 digits stored without dashes
+  fan            String?     @unique @db.Char(16)
+
+  // Assignment
+  stationId      String?
+  station        Station?    @relation(fields: [stationId], references: [id])
+
+  // Employment details
+  basicSalary    Decimal     @db.Decimal(10, 2)
+  role           EmployeeRole
+  accountNumber  String?
+  employmentDate DateTime?   @db.Date
+  sex            Sex
+
+  // Soft delete
+  isDeleted      Boolean     @default(false)
+  deletedAt      DateTime?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  posMachines         PosMachine[]         // machines currently assigned to this employee
+  posMachineHistory   PosMachineHistory[]  // all historical assignments
+  pettyCash           PettyCash[]          // only supervisors have entries
+
+  @@index([stationId, isDeleted])
+  @@index([role])
+  @@index([isDeleted])
+  @@map("employees")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PETTY CASH  (Supervisor only)
+// Each row = one disbursement event
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PettyCash {
+  id          String         @id @default(cuid())
+
+  employeeId  String
+  employee    Employee       @relation(fields: [employeeId], references: [id])
+
+  amount      Decimal        @db.Decimal(10, 2)
+  date        DateTime       @db.Date
+  method      DeliveryMethod
+  reference   String         // bank TXN id, cheque no., Telebirr ref, etc.
+  note        String?
+
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([employeeId])
+  @@index([date])
+  @@map("petty_cash")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POS MACHINE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PosMachine {
+  id                 String    @id @default(cuid())
+  code               String    @unique // e.g. "POS-001"
+
+  make               String    // e.g. "Verifone"
+  model              String    // e.g. "V240m"
+  serial             String    @unique
+  status             PosStatus @default(ACTIVE)
+  appVersion         String    // e.g. "ORO Ticket v2.4.1"
+  remark             String?
+
+  // Current station
+  stationId          String?
+  station            Station?  @relation(fields: [stationId], references: [id])
+
+  // Current operator (employee)
+  employeeId         String?
+  employee           Employee? @relation(fields: [employeeId], references: [id])
+
+  // Soft delete
+  isDeleted          Boolean   @default(false)
+  deletedAt          DateTime?
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Full assignment history
+  history            PosMachineHistory[]
+
+  @@index([stationId])
+  @@index([employeeId])
+  @@index([status, isDeleted])
+  @@map("pos_machines")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POS MACHINE HISTORY
+// One row per assignment window.  toDate = null means currently active.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PosMachineHistory {
+  id           String     @id @default(cuid())
+
+  posMachineId String
+  posMachine   PosMachine @relation(fields: [posMachineId], references: [id])
+
+  // Snapshot of who/where at time of assignment
+  employeeId   String?
+  employee     Employee?  @relation(fields: [employeeId], references: [id])
+  employeeName String?    // denormalised in case employee is later deleted
+
+  stationId    String?
+  stationName  String?    // denormalised for the same reason
+
+  fromDate     DateTime   @db.Date
+  toDate       DateTime?  @db.Date  // null = current assignment
+
+  remark       String?
+
+  createdAt    DateTime   @default(now())
+
+  @@index([posMachineId])
+  @@index([employeeId])
+  @@index([toDate])           // fast query for "find open assignments"
+  @@map("pos_machine_history")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FARE PRICE MATRIX
+// One row per unique (busType, busLevel) combination = 9 rows total.
+// Each row stores both asphalt and gravel rates.
+// Fare = (asphaltKm × asphaltRate) + (gravelKm × gravelRate)
+// Hard delete — config table, no soft delete needed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FareMatrix {
+  id           String   @id @default(cuid())
+
+  busType      BusType
+  busLevel     BusLevel
+
+  asphaltRate  Decimal  @db.Decimal(8, 4)  // ETB per km
+  gravelRate   Decimal  @db.Decimal(8, 4)  // ETB per km
+
+  // Audit
+  updatedBy    String?  // admin user id placeholder for when auth is added
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Enforce exactly one row per (busType, busLevel) pair
+  @@unique([busType, busLevel])
+  @@index([busType])
+  @@map("fare_matrix")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN USER  (placeholder — single user for now, auth to be added later)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AdminUser {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  pin       String   // hashed PIN for POS login flow
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("admin_users")
+}

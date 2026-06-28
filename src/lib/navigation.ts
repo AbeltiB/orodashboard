@@ -5,6 +5,7 @@ import {
   CreditCard,
   FileBarChart,
   Settings,
+  DollarSign
 } from "lucide-react";
 
 export const navigation = [
@@ -30,6 +31,11 @@ export const navigation = [
     title: "POS Machines",
     href: "/dashboard/pos-machines",
     icon: CreditCard,
+  },
+  {
+    title: "Fare Matrix",
+    href: "/dashboard/fare-price-matrix",
+    icon: DollarSign,
   },
 
   {

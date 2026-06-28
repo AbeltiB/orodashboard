@@ -8,7 +8,18 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TerminalRef = { id: string; isStation: boolean; name: string; isDeparture: boolean; isArrival: boolean };
+type RoadType    = "asphalt" | "gravel" | "mixed";
+type TerminalRef = {
+  id: string;
+  isStation: boolean;
+  name: string;
+  isDeparture: boolean;
+  isArrival: boolean;
+  distanceKm: number;
+  roadType: RoadType;
+  asphaltKm: number;   // only used when roadType === "mixed"
+  gravelKm: number;    // only used when roadType === "mixed"
+};
 type Employee    = { id: string; fullName: string; phone: string; email: string; isWorking: boolean; remark: string };
 type POS         = { id: string; serial: string; typeName: string; assignedTo: string };
 
@@ -33,8 +44,8 @@ const SEED: Station[] = [
     zone: "Central",
     location: "Meskel Square, Addis Ababa",
     terminals: [
-      { id: "t1", isStation: true,  name: "Bole Station",      isDeparture: true,  isArrival: false },
-      { id: "t2", isStation: false, name: "Hayat Stop",         isDeparture: false, isArrival: true  },
+      { id: "t1", isStation: true,  name: "Bole Station", isDeparture: true,  isArrival: false, distanceKm: 12.5, roadType: "asphalt", asphaltKm: 12.5, gravelKm: 0 },
+      { id: "t2", isStation: false, name: "Hayat Stop",  isDeparture: false, isArrival: true,  distanceKm: 18.0, roadType: "mixed",   asphaltKm: 11.0, gravelKm: 7.0  },
     ],
     employees: [
       { id: "e1", fullName: "Abebe Girma",   phone: "0911234567", email: "abebe@adrash.et",  isWorking: true,  remark: "" },
@@ -241,7 +252,7 @@ function DeleteModal({ name, onConfirm, onClose }: { name: string; onConfirm: ()
 // ─── Terminals tab ────────────────────────────────────────────────────────────
 
 function TerminalsTab({ station, allStations, onChange }: { station: Station; allStations: Station[]; onChange: (t: TerminalRef[]) => void }) {
-  const blank: Omit<TerminalRef, "id"> = { isStation: false, name: "", isDeparture: false, isArrival: true };
+  const blank: Omit<TerminalRef, "id"> = { isStation: false, name: "", isDeparture: false, isArrival: true, distanceKm: 0, roadType: "asphalt", asphaltKm: 0, gravelKm: 0 };
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(blank);
   const [query, setQuery] = useState("");
@@ -260,29 +271,63 @@ function TerminalsTab({ station, allStations, onChange }: { station: Station; al
     onChange(station.terminals.map(t => t.id === id ? { ...t, [key]: !t[key] } : t));
   }
 
+  // road type display helpers
+  const roadBadge = (t: TerminalRef) => {
+    if (t.roadType === "asphalt") return { label: "Asphalt", bg: "#f1f5f9", fg: "#0f172a" };
+    if (t.roadType === "gravel")  return { label: "Gravel",  bg: "#fef3c7", fg: "#d97706" };
+    return { label: "Mixed", bg: "#ede9fe", fg: "#7c3aed" };
+  };
+
+  const roadSummary = (t: TerminalRef) => {
+    if (t.roadType === "mixed")
+      return `${t.asphaltKm} km asphalt + ${t.gravelKm} km gravel`;
+    return `${t.distanceKm} km ${t.roadType}`;
+  };
+
   return (
     <div>
       {station.terminals.length === 0 && !adding && (
         <p style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 16 }}>No terminals added yet.</p>
       )}
 
-      {station.terminals.map(t => (
-        <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", marginBottom: 8, background: "var(--background)" }}>
-          <Navigation size={14} color="var(--muted-foreground)" style={{ flexShrink: 0 }} />
-          <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: "var(--foreground)" }}>{t.name}</span>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {t.isStation && <Badge label="Station" color="blue" />}
-            <button onClick={() => toggle(t.id, "isDeparture")} style={{ border: "none", cursor: "pointer", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 600, background: t.isDeparture ? "#dcfce7" : "#f1f5f9", color: t.isDeparture ? "#16a34a" : "#94a3b8" }}>Departure</button>
-            <button onClick={() => toggle(t.id, "isArrival")} style={{ border: "none", cursor: "pointer", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 600, background: t.isArrival ? "#dbeafe" : "#f1f5f9", color: t.isArrival ? "#1d4ed8" : "#94a3b8" }}>Arrival</button>
+      {station.terminals.map(t => {
+        const rb = roadBadge(t);
+        return (
+          <div key={t.id} style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid var(--border)", marginBottom: 8, background: "var(--background)" }}>
+            {/* Top row: icon + name + flags + delete */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Navigation size={14} color="var(--muted-foreground)" style={{ flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{t.name}</span>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                {t.isStation && <Badge label="Station" color="blue" />}
+                <button onClick={() => toggle(t.id, "isDeparture")} style={{ border: "none", cursor: "pointer", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 600, background: t.isDeparture ? "#dcfce7" : "#f1f5f9", color: t.isDeparture ? "#16a34a" : "#94a3b8" }}>Departure</button>
+                <button onClick={() => toggle(t.id, "isArrival")} style={{ border: "none", cursor: "pointer", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 600, background: t.isArrival ? "#dbeafe" : "#f1f5f9", color: t.isArrival ? "#1d4ed8" : "#94a3b8" }}>Arrival</button>
+              </div>
+              <button onClick={() => remove(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4, display: "flex", flexShrink: 0 }}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+            {/* Bottom row: distance + road breakdown */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground)", fontFamily: "monospace" }}>
+                {t.distanceKm} km
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", padding: "1px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: rb.bg, color: rb.fg }}>
+                {rb.label}
+              </span>
+              {t.roadType === "mixed" && (
+                <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>
+                  {t.asphaltKm} km asphalt · {t.gravelKm} km gravel
+                </span>
+              )}
+            </div>
           </div>
-          <button onClick={() => remove(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4, display: "flex" }}>
-            <Trash2 size={14} />
-          </button>
-        </div>
-      ))}
+        );
+      })}
 
       {adding ? (
         <div style={{ border: "1.5px solid var(--primary)", borderRadius: 12, padding: 16, marginBottom: 8, background: "var(--surface)" }}>
+          {/* Terminal name with station search */}
           <Field label="Terminal name">
             <div style={{ position: "relative" }}>
               <input
@@ -306,7 +351,9 @@ function TerminalsTab({ station, allStations, onChange }: { station: Station; al
               )}
             </div>
           </Field>
-          <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
+
+          {/* Departure / Arrival checkboxes */}
+          <div style={{ display: "flex", gap: 20, marginBottom: 14 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
               <input type="checkbox" checked={form.isDeparture} onChange={e => setForm(f => ({ ...f, isDeparture: e.target.checked }))} />
               Departure terminal
@@ -316,7 +363,92 @@ function TerminalsTab({ station, allStations, onChange }: { station: Station; al
               Arrival terminal
             </label>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+
+          {/* Road type selector */}
+          <Field label="Road type">
+            <div style={{ display: "flex", gap: 8 }}>
+              {(["asphalt", "gravel", "mixed"] as RoadType[]).map(rt => {
+                const active = form.roadType === rt;
+                const colors: Record<RoadType, { bg: string; fg: string; border: string }> = {
+                  asphalt: { bg: "#f1f5f9", fg: "#0f172a",  border: "#0f172a"  },
+                  gravel:  { bg: "#fef3c7", fg: "#d97706",  border: "#d97706"  },
+                  mixed:   { bg: "#ede9fe", fg: "#7c3aed",  border: "#7c3aed"  },
+                };
+                const c = colors[rt];
+                return (
+                  <button key={rt} onClick={() => setForm(f => ({
+                    ...f, roadType: rt,
+                    // auto-fill total when switching away from mixed
+                    distanceKm: rt !== "mixed" ? f.distanceKm : f.asphaltKm + f.gravelKm,
+                  }))} style={{
+                    flex: 1, height: 36, borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700,
+                    border: `1.5px solid ${active ? c.border : "var(--border)"}`,
+                    background: active ? c.bg : "var(--surface)",
+                    color: active ? c.fg : "var(--muted-foreground)",
+                    textTransform: "capitalize", transition: "all 0.12s",
+                  }}>
+                    {rt}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+
+          {/* Distance fields — conditional on road type */}
+          {form.roadType !== "mixed" ? (
+            <Field label={`Total distance (km) — ${form.roadType}`}>
+              <div style={{ display: "flex", alignItems: "center", border: "1.5px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
+                <input
+                  type="number" min={0} step={0.1} placeholder="0.0"
+                  value={form.distanceKm || ""}
+                  onChange={e => setForm(f => ({ ...f, distanceKm: parseFloat(e.target.value) || 0 }))}
+                  style={{ flex: 1, height: 42, padding: "0 12px", border: "none", outline: "none", background: "transparent", fontSize: 15, fontWeight: 600, color: "var(--foreground)", fontFamily: "monospace" }}
+                />
+                <span style={{ padding: "0 14px", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", borderLeft: "1px solid var(--border)", height: "100%", display: "flex", alignItems: "center" }}>km</span>
+              </div>
+            </Field>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Asphalt portion (km)">
+                  <div style={{ display: "flex", alignItems: "center", border: "1.5px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
+                    <input type="number" min={0} step={0.1} placeholder="0.0"
+                      value={form.asphaltKm || ""}
+                      onChange={e => {
+                        const v = parseFloat(e.target.value) || 0;
+                        setForm(f => ({ ...f, asphaltKm: v, distanceKm: v + f.gravelKm }));
+                      }}
+                      style={{ flex: 1, height: 42, padding: "0 10px", border: "none", outline: "none", background: "transparent", fontSize: 14, fontWeight: 600, color: "#0f172a", fontFamily: "monospace" }}
+                    />
+                    <span style={{ padding: "0 10px", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", borderLeft: "1px solid var(--border)", height: "100%", display: "flex", alignItems: "center" }}>km</span>
+                  </div>
+                </Field>
+                <Field label="Gravel portion (km)">
+                  <div style={{ display: "flex", alignItems: "center", border: "1.5px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
+                    <input type="number" min={0} step={0.1} placeholder="0.0"
+                      value={form.gravelKm || ""}
+                      onChange={e => {
+                        const v = parseFloat(e.target.value) || 0;
+                        setForm(f => ({ ...f, gravelKm: v, distanceKm: f.asphaltKm + v }));
+                      }}
+                      style={{ flex: 1, height: 42, padding: "0 10px", border: "none", outline: "none", background: "transparent", fontSize: 14, fontWeight: 600, color: "#d97706", fontFamily: "monospace" }}
+                    />
+                    <span style={{ padding: "0 10px", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", borderLeft: "1px solid var(--border)", height: "100%", display: "flex", alignItems: "center" }}>km</span>
+                  </div>
+                </Field>
+              </div>
+              {/* Auto-computed total */}
+              {(form.asphaltKm > 0 || form.gravelKm > 0) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: -4, marginBottom: 14, padding: "8px 12px", borderRadius: 8, background: "#ede9fe", border: "1px solid #c4b5fd" }}>
+                  <span style={{ fontSize: 12, color: "#7c3aed", fontWeight: 500 }}>Total distance:</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "#7c3aed", fontFamily: "monospace" }}>{(form.asphaltKm + form.gravelKm).toFixed(1)} km</span>
+                  <span style={{ fontSize: 11, color: "#7c3aed", opacity: 0.7 }}>({form.asphaltKm} asp. + {form.gravelKm} grv.)</span>
+                </div>
+              )}
+            </>
+          )}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
             <button onClick={add} style={{ height: 36, padding: "0 18px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Add terminal</button>
             <button onClick={() => { setAdding(false); setForm(blank); setQuery(""); }} style={{ height: 36, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
           </div>
