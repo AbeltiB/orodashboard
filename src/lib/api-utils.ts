@@ -1,46 +1,42 @@
-import { $Enums, type Terminal, type Station } from "@/generated/prisma/client";
+// src/lib/api-utils.ts
+import { $Enums, type Terminal, type Station, type Employee, type PosMachine } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Region / road-type helpers
+// Enum maps
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const REGION_VALUES = [
-  "ADDIS_ABABA",
-  "OROMIA",
-  "AMHARA",
-  "TIGRAY",
-  "SNNPR",
-  "AFAR",
-  "SOMALI",
-  "BENISHANGUL_GUMUZ",
-  "GAMBELA",
-  "HARARI",
-  "DIRE_DAWA",
-  "SIDAMA",
+  "ADDIS_ABABA", "OROMIA", "AMHARA", "TIGRAY", "SNNPR", "AFAR",
+  "SOMALI", "BENISHANGUL_GUMUZ", "GAMBELA", "HARARI", "DIRE_DAWA", "SIDAMA",
 ] as const;
 
 export const ROAD_TYPE_INPUTS = ["asphalt", "gravel", "mixed"] as const;
 
 const roadTypeInputToEnum: Record<(typeof ROAD_TYPE_INPUTS)[number], $Enums.RoadType> = {
-  asphalt: "ASPHALT",
-  gravel: "GRAVEL",
-  mixed: "MIXED",
+  asphalt: "ASPHALT", gravel: "GRAVEL", mixed: "MIXED",
 };
-
 const roadTypeEnumToInput: Record<$Enums.RoadType, (typeof ROAD_TYPE_INPUTS)[number]> = {
-  ASPHALT: "asphalt",
-  GRAVEL: "gravel",
-  MIXED: "mixed",
+  ASPHALT: "asphalt", GRAVEL: "gravel", MIXED: "mixed",
 };
 
-export function roadTypeToEnum(value: (typeof ROAD_TYPE_INPUTS)[number]): $Enums.RoadType {
-  return roadTypeInputToEnum[value];
+export function roadTypeToEnum(v: (typeof ROAD_TYPE_INPUTS)[number]): $Enums.RoadType {
+  return roadTypeInputToEnum[v];
+}
+export function roadTypeFromEnum(v: $Enums.RoadType): (typeof ROAD_TYPE_INPUTS)[number] {
+  return roadTypeEnumToInput[v] ?? "asphalt";
 }
 
-export function roadTypeFromEnum(value: $Enums.RoadType): (typeof ROAD_TYPE_INPUTS)[number] {
-  return roadTypeEnumToInput[value] ?? "asphalt";
-}
+export const BUS_TYPE_VALUES = ["BUS", "MIDBUS", "MINIBUS"] as const;
+export const BUS_LEVEL_VALUES = ["LEVEL_1", "LEVEL_2", "LEVEL_3"] as const;
+export const EMPLOYEE_ROLE_VALUES = ["SUPERVISOR", "TICKETER", "CASHIER"] as const;
+export const SEX_VALUES = ["MALE", "FEMALE"] as const;
+export const POS_STATUS_VALUES = ["ACTIVE", "IDLE", "MAINTENANCE", "DECOMMISSIONED"] as const;
+export const DELIVERY_METHOD_VALUES = ["BANK_TRANSFER", "CHEQUE", "TELEBIRR", "OTHER"] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Type coercion
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function toNumber(value: unknown): number {
   if (value === null || value === undefined) return 0;
@@ -53,7 +49,7 @@ export function toNumber(value: unknown): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Station code generation
+// Code generators
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function generateStationCode(): Promise<string> {
@@ -62,14 +58,35 @@ export async function generateStationCode(): Promise<string> {
     orderBy: { code: "desc" },
     select: { code: true },
   });
-
   const match = latest?.code.match(/STN-(\d+)/);
   const next = (match ? parseInt(match[1], 10) : 0) + 1;
   return `STN-${String(next).padStart(3, "0")}`;
 }
 
+export async function generateEmployeeCode(): Promise<string> {
+  const latest = await prisma.employee.findFirst({
+    where: { code: { startsWith: "EMP-" } },
+    orderBy: { code: "desc" },
+    select: { code: true },
+  });
+  const match = latest?.code.match(/EMP-(\d+)/);
+  const next = (match ? parseInt(match[1], 10) : 0) + 1;
+  return `EMP-${String(next).padStart(3, "0")}`;
+}
+
+export async function generatePosCode(): Promise<string> {
+  const latest = await prisma.posMachine.findFirst({
+    where: { code: { startsWith: "POS-" } },
+    orderBy: { code: "desc" },
+    select: { code: true },
+  });
+  const match = latest?.code.match(/POS-(\d+)/);
+  const next = (match ? parseInt(match[1], 10) : 0) + 1;
+  return `POS-${String(next).padStart(3, "0")}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Serialization helpers
+// Serializers
 // ─────────────────────────────────────────────────────────────────────────────
 
 type TerminalWithLinkedStation = Terminal & {
@@ -130,8 +147,71 @@ export function serializeStation(station: StationWithCounts) {
   };
 }
 
+type EmployeeWithRelations = Employee & {
+  station?: { id: string; name: string; code: string } | null;
+  posMachines?: { id: string; code: string; serial: string }[];
+};
+
+export function serializeEmployee(e: EmployeeWithRelations) {
+  return {
+    id: e.id,
+    code: e.code,
+    firstName: e.firstName,
+    middleName: e.middleName,
+    lastName: e.lastName,
+    fullName: [e.firstName, e.middleName, e.lastName].filter(Boolean).join(" "),
+    phone: e.phone,
+    email: e.email,
+    fan: e.fan,
+    accountNumber: e.accountNumber,
+    role: e.role,
+    sex: e.sex,
+    basicSalary: toNumber(e.basicSalary),
+    employmentDate: e.employmentDate,
+    stationId: e.stationId,
+    station: e.station ?? null,
+    posMachines: e.posMachines ?? [],
+    isDeleted: e.isDeleted,
+    deletedAt: e.deletedAt,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+  };
+}
+
+type PosMachineWithRelations = PosMachine & {
+  station?: { id: string; name: string; code: string } | null;
+  employee?: { id: string; code: string; firstName: string; lastName: string } | null;
+};
+
+export function serializePosMachine(p: PosMachineWithRelations) {
+  return {
+    id: p.id,
+    code: p.code,
+    make: p.make,
+    model: p.model,
+    serial: p.serial,
+    status: p.status,
+    appVersion: p.appVersion,
+    remark: p.remark,
+    stationId: p.stationId,
+    station: p.station ?? null,
+    employeeId: p.employeeId,
+    employee: p.employee
+      ? {
+          id: p.employee.id,
+          code: p.employee.code,
+          name: `${p.employee.firstName} ${p.employee.lastName}`,
+        }
+      : null,
+    isDeleted: p.isDeleted,
+    deletedAt: p.deletedAt,
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Common response helpers
+// Response helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function ok<T>(data: T, init?: ResponseInit) {
@@ -151,12 +231,18 @@ export function unauthorized(message = "Unauthorized") {
 }
 
 export function notFound(resource = "Resource") {
-  return Response.json({ error: "Not Found", message: `${resource} not found.` }, { status: 404 });
+  return Response.json(
+    { error: "Not Found", message: `${resource} not found.` },
+    { status: 404 }
+  );
+}
+
+export function conflict(message: string) {
+  return Response.json({ error: "Conflict", message }, { status: 409 });
 }
 
 export function serverError(error: unknown) {
   const message = error instanceof Error ? error.message : "Internal server error";
-  // eslint-disable-next-line no-console
   console.error("API error:", error);
   return Response.json({ error: "Internal Server Error", message }, { status: 500 });
 }
@@ -164,4 +250,17 @@ export function serverError(error: unknown) {
 export function parseIncludeDeleted(searchParams: URLSearchParams): boolean {
   const value = searchParams.get("includeDeleted");
   return value === "true" || value === "1";
+}
+
+export function parsePagination(
+  searchParams: URLSearchParams,
+  defaultLimit = 100,
+  maxLimit = 500
+) {
+  const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10) || 0);
+  const limit = Math.min(
+    maxLimit,
+    Math.max(1, parseInt(searchParams.get("limit") ?? String(defaultLimit), 10) || defaultLimit)
+  );
+  return { offset, limit };
 }

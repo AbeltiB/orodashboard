@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/prisma/client"
@@ -10,7 +8,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ENUMS
@@ -94,10 +92,11 @@ model Station {
   updatedAt DateTime @updatedAt
 
   // Relations
-  terminalsAsOrigin  Terminal[] @relation("OriginStation")   // terminals that list THIS station as their home
-  terminalsAsTarget  Terminal[] @relation("TargetStation")   // when terminal points to another station
+  terminalsAsOrigin  Terminal[] @relation("OriginStation")
+  terminalsAsTarget  Terminal[] @relation("TargetStation")
   employees          Employee[]
   posMachines        PosMachine[]
+  posMachineHistory  PosMachineHistory[]
 
   @@index([isDeleted])
   @@index([region])
@@ -106,38 +105,29 @@ model Station {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TERMINAL
-// A terminal belongs to one Station (origin).
-// It may optionally reference another Station (when isLinkedStation = true).
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Terminal {
   id               String   @id @default(cuid())
 
-  // Which station owns this terminal entry
   stationId        String
   station          Station  @relation("OriginStation", fields: [stationId], references: [id])
 
-  // Display name — either custom text or mirrors the linked station's name
   name             String
 
-  // When this terminal IS another station in the system
   isLinkedStation  Boolean  @default(false)
   linkedStationId  String?
   linkedStation    Station? @relation("TargetStation", fields: [linkedStationId], references: [id])
 
-  // Direction flags
   isDeparture      Boolean  @default(false)
   isArrival        Boolean  @default(true)
 
-  // Distance & road
-  distanceKm       Decimal  @db.Decimal(8, 2)  // total km
+  distanceKm       Decimal  @db.Decimal(8, 2)
   roadType         RoadType
 
-  // Only populated when roadType = MIXED
   asphaltKm        Decimal? @db.Decimal(8, 2)
   gravelKm         Decimal? @db.Decimal(8, 2)
 
-  // Soft delete
   isDeleted        Boolean  @default(false)
   deletedAt        DateTime?
 
@@ -157,43 +147,36 @@ model Employee {
   id             String      @id @default(cuid())
   code           String      @unique // e.g. "EMP-001"
 
-  // Name
   firstName      String
   middleName     String?
   lastName       String
 
-  // Contact
   phone          String      @unique
   email          String?     @unique
 
-  // POS machine login — stored as plain text per admin requirement
   posPassword    String?
 
   // Fayda Alias Number — 16 digits stored without dashes
   fan            String?     @unique @db.Char(16)
 
-  // Assignment
   stationId      String?
   station        Station?    @relation(fields: [stationId], references: [id])
 
-  // Employment details
   basicSalary    Decimal     @db.Decimal(10, 2)
   role           EmployeeRole
   accountNumber  String?
   employmentDate DateTime?   @db.Date
   sex            Sex
 
-  // Soft delete
   isDeleted      Boolean     @default(false)
   deletedAt      DateTime?
 
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  // Relations
-  posMachines         PosMachine[]         // machines currently assigned to this employee
-  posMachineHistory   PosMachineHistory[]  // all historical assignments
-  pettyCash           PettyCash[]          // only supervisors have entries
+  posMachines         PosMachine[]
+  posMachineHistory   PosMachineHistory[]
+  pettyCash           PettyCash[]
 
   @@index([stationId, isDeleted])
   @@index([role])
@@ -202,8 +185,7 @@ model Employee {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PETTY CASH  (Supervisor only)
-// Each row = one disbursement event
+// PETTY CASH
 // ─────────────────────────────────────────────────────────────────────────────
 
 model PettyCash {
@@ -215,7 +197,7 @@ model PettyCash {
   amount      Decimal        @db.Decimal(10, 2)
   date        DateTime       @db.Date
   method      DeliveryMethod
-  reference   String         // bank TXN id, cheque no., Telebirr ref, etc.
+  reference   String
   note        String?
 
   createdAt   DateTime       @default(now())
@@ -234,29 +216,25 @@ model PosMachine {
   id                 String    @id @default(cuid())
   code               String    @unique // e.g. "POS-001"
 
-  make               String    // e.g. "Verifone"
-  model              String    // e.g. "V240m"
+  make               String
+  model              String
   serial             String    @unique
   status             PosStatus @default(ACTIVE)
-  appVersion         String    // e.g. "ORO Ticket v2.4.1"
+  appVersion         String
   remark             String?
 
-  // Current station
   stationId          String?
   station            Station?  @relation(fields: [stationId], references: [id])
 
-  // Current operator (employee)
   employeeId         String?
   employee           Employee? @relation(fields: [employeeId], references: [id])
 
-  // Soft delete
   isDeleted          Boolean   @default(false)
   deletedAt          DateTime?
 
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  // Full assignment history
   history            PosMachineHistory[]
 
   @@index([stationId])
@@ -267,7 +245,6 @@ model PosMachine {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POS MACHINE HISTORY
-// One row per assignment window.  toDate = null means currently active.
 // ─────────────────────────────────────────────────────────────────────────────
 
 model PosMachineHistory {
@@ -276,16 +253,16 @@ model PosMachineHistory {
   posMachineId String
   posMachine   PosMachine @relation(fields: [posMachineId], references: [id])
 
-  // Snapshot of who/where at time of assignment
   employeeId   String?
   employee     Employee?  @relation(fields: [employeeId], references: [id])
-  employeeName String?    // denormalised in case employee is later deleted
+  employeeName String?
 
   stationId    String?
-  stationName  String?    // denormalised for the same reason
+  station      Station?   @relation(fields: [stationId], references: [id])
+  stationName  String?
 
   fromDate     DateTime   @db.Date
-  toDate       DateTime?  @db.Date  // null = current assignment
+  toDate       DateTime?  @db.Date
 
   remark       String?
 
@@ -293,16 +270,12 @@ model PosMachineHistory {
 
   @@index([posMachineId])
   @@index([employeeId])
-  @@index([toDate])           // fast query for "find open assignments"
+  @@index([toDate])
   @@map("pos_machine_history")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FARE PRICE MATRIX
-// One row per unique (busType, busLevel) combination = 9 rows total.
-// Each row stores both asphalt and gravel rates.
-// Fare = (asphaltKm × asphaltRate) + (gravelKm × gravelRate)
-// Hard delete — config table, no soft delete needed.
 // ─────────────────────────────────────────────────────────────────────────────
 
 model FareMatrix {
@@ -311,28 +284,42 @@ model FareMatrix {
   busType      BusType
   busLevel     BusLevel
 
-  asphaltRate  Decimal  @db.Decimal(8, 4)  // ETB per km
-  gravelRate   Decimal  @db.Decimal(8, 4)  // ETB per km
+  asphaltRate  Decimal  @db.Decimal(8, 4)
+  gravelRate   Decimal  @db.Decimal(8, 4)
 
-  // Audit
-  updatedBy    String?  // admin user id placeholder for when auth is added
+  updatedBy    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Enforce exactly one row per (busType, busLevel) pair
   @@unique([busType, busLevel])
   @@index([busType])
   @@map("fare_matrix")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADMIN USER  (placeholder — single user for now, auth to be added later)
+// SYSTEM CONFIG  (key-value store for settings)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model SystemConfig {
+  key         String   @id
+  value       String
+  description String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN USER
 // ─────────────────────────────────────────────────────────────────────────────
 
 model AdminUser {
   id        String   @id @default(cuid())
+  name      String
   phone     String   @unique
-  pin       String   // hashed PIN for POS login flow
+  pin       String   // bcrypt-hashed PIN
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

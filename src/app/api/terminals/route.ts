@@ -1,26 +1,32 @@
+// src/app/api/terminals/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { requireAuth } from "@/lib/api-auth";
 import {
-  badRequest,
-  created,
   ok,
   parseIncludeDeleted,
-  roadTypeToEnum,
+  parsePagination,
   serializeTerminal,
   serverError,
 } from "@/lib/api-utils";
-import { createTerminalSchema } from "@/lib/schemas/terminal";
 
-const DEFAULT_LIMIT = 100;
-const MAX_LIMIT = 500;
-
-const terminalInclude = {
-  station: { select: { id: true, name: true, code: true } },
-  linkedStation: { select: { id: true, name: true, code: true } },
-} as const;
-
+/**
+ * GET /api/terminals
+ * Read-only listing. Terminals are created/updated via the stations API
+ * (PATCH /api/stations/:id with a `terminals` array). This endpoint exists
+ * for cross-station lookups, reporting, and the fare calculator.
+ *
+ * Query params:
+ *   stationId        — filter by origin station
+ *   linkedStationId  — filter by linked/target station
+ *   roadType         — ASPHALT | GRAVEL | MIXED
+ *   isDeparture      — "true" | "false"
+ *   isArrival        — "true" | "false"
+ *   search           — partial match on terminal name
+ *   includeDeleted   — include soft-deleted records
+ *   offset, limit
+ */
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
   if (auth) return auth;
@@ -28,43 +34,35 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const includeDeleted = parseIncludeDeleted(searchParams);
+    const { offset, limit } = parsePagination(searchParams, 200, 1000);
+
     const stationId = searchParams.get("stationId")?.trim();
-    const roadType = searchParams.get("roadType")?.trim().toLowerCase();
+    const linkedStationId = searchParams.get("linkedStationId")?.trim();
+    const roadType = searchParams.get("roadType")?.trim();
     const search = searchParams.get("search")?.trim();
-    const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10) || 0);
-    const limit = Math.min(
-      MAX_LIMIT,
-      Math.max(1, parseInt(searchParams.get("limit") ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT)
-    );
+
+    const isDepartureParam = searchParams.get("isDeparture");
+    const isArrivalParam = searchParams.get("isArrival");
 
     const where: Prisma.TerminalWhereInput = {};
-
-    if (!includeDeleted) {
-      where.isDeleted = false;
-    }
-
-    if (stationId) {
-      where.stationId = stationId;
-    }
-
-    if (roadType && ["asphalt", "gravel", "mixed"].includes(roadType)) {
-      where.roadType = roadTypeToEnum(roadType as "asphalt" | "gravel" | "mixed");
-    }
-
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { station: { name: { contains: search, mode: "insensitive" } } },
-      ];
-    }
+    if (!includeDeleted) where.isDeleted = false;
+    if (stationId) where.stationId = stationId;
+    if (linkedStationId) where.linkedStationId = linkedStationId;
+    if (roadType) where.roadType = roadType as Prisma.TerminalWhereInput["roadType"];
+    if (isDepartureParam !== null) where.isDeparture = isDepartureParam === "true";
+    if (isArrivalParam !== null) where.isArrival = isArrivalParam === "true";
+    if (search) where.name = { contains: search, mode: "insensitive" };
 
     const [terminals, total] = await Promise.all([
       prisma.terminal.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        include: {
+          station: { select: { id: true, name: true, code: true, region: true } },
+          linkedStation: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: [{ stationId: "asc" }, { createdAt: "asc" }],
         skip: offset,
         take: limit,
-        include: terminalInclude,
       }),
       prisma.terminal.count({ where }),
     ]);
@@ -75,52 +73,7 @@ export async function GET(request: NextRequest) {
         station: t.station,
         linkedStation: t.linkedStation,
       })),
-      meta: {
-        total,
-        offset,
-        limit,
-        hasMore: offset + terminals.length < total,
-      },
-    });
-  } catch (error) {
-    return serverError(error);
-  }
-}
-
-export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
-
-  try {
-    const body = await request.json();
-    const parsed = createTerminalSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return badRequest("Invalid request body.", parsed.error.flatten());
-    }
-
-    const { stationId, name, isStation, linkedStationId, isDeparture, isArrival, distanceKm, roadType, asphaltKm, gravelKm } = parsed.data;
-
-    const terminal = await prisma.terminal.create({
-      data: {
-        stationId,
-        name,
-        isLinkedStation: isStation,
-        linkedStationId: isStation ? (linkedStationId ?? null) : null,
-        isDeparture,
-        isArrival,
-        distanceKm,
-        roadType: roadTypeToEnum(roadType),
-        asphaltKm: roadType === "mixed" ? (asphaltKm ?? 0) : null,
-        gravelKm: roadType === "mixed" ? (gravelKm ?? 0) : null,
-      },
-      include: terminalInclude,
-    });
-
-    return created({
-      ...serializeTerminal(terminal),
-      station: terminal.station,
-      linkedStation: terminal.linkedStation,
+      meta: { total, offset, limit, hasMore: offset + terminals.length < total },
     });
   } catch (error) {
     return serverError(error);
