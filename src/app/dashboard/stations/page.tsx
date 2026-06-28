@@ -14,7 +14,7 @@ type RoadType = "asphalt" | "gravel" | "mixed";
 type TerminalRef = {
   id: string;
   name: string;
-  isLinkedStation: boolean;
+  isStation: boolean;
   linkedStationId: string | null;
   isDeparture: boolean;
   isArrival: boolean;
@@ -38,7 +38,7 @@ type Station = {
   zone: string;
   location: string;
   terminals: TerminalRef[];
-  _count: StationCounts;
+  counts: StationCounts;
 };
 
 // ─── Regions (must match Prisma Region enum values) ───────────────────────────
@@ -172,8 +172,8 @@ function StationFormModal({ initial, onSave, onClose }: {
       // New stations come back without embedded terminal/employee data — normalise
       onSave({
         ...result,
-        terminals:  result.terminals  ?? [],
-        _count:     result._count     ?? { terminalsAsOrigin: 0, employees: 0, posMachines: 0 },
+        terminals: result.terminals ?? [],
+        counts:    result.counts    ?? { terminalsAsOrigin: 0, employees: 0, posMachines: 0 },
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -290,7 +290,7 @@ function TerminalsTab({ station, allStations, onTerminalChange }: {
           terminals: next.map(t => ({
             id:              t.id.startsWith("new_") ? undefined : t.id,
             name:            t.name,
-            isStation:       t.isLinkedStation,
+            isStation:       t.isStation,
             linkedStationId: t.linkedStationId ?? undefined,
             isDeparture:     t.isDeparture,
             isArrival:       t.isArrival,
@@ -314,7 +314,7 @@ function TerminalsTab({ station, allStations, onTerminalChange }: {
     const newT: TerminalRef = {
       id:              `new_${Date.now()}`,
       name:            form.name,
-      isLinkedStation: form.isStation,
+      isStation: form.isStation,
       linkedStationId: form.isStation ? form.linkedStationId : null,
       isDeparture:     form.isDeparture,
       isArrival:       form.isArrival,
@@ -369,7 +369,7 @@ function TerminalsTab({ station, allStations, onTerminalChange }: {
             <Navigation size={14} color="var(--muted-foreground)" style={{ flexShrink: 0 }} />
             <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{t.name}</span>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-              {t.isLinkedStation && <Badge label="Station" color="blue" />}
+              {t.isStation && <Badge label="Station" color="blue" />}
               <button onClick={() => toggleFlag(t.id, "isDeparture")} style={{ border: "none", cursor: "pointer", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 600, background: t.isDeparture ? "#dcfce7" : "#f1f5f9", color: t.isDeparture ? "#16a34a" : "#94a3b8" }}>Departure</button>
               <button onClick={() => toggleFlag(t.id, "isArrival")}   style={{ border: "none", cursor: "pointer", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 600, background: t.isArrival  ? "#dbeafe" : "#f1f5f9", color: t.isArrival  ? "#1d4ed8" : "#94a3b8" }}>Arrival</button>
             </div>
@@ -518,7 +518,7 @@ function DetailPanel({ station, allStations, onEdit, onDelete, onReload }: {
     );
   }
 
-  const counts = station._count;
+  const counts = station.counts;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -741,8 +741,8 @@ export default function StationsPage() {
                       <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 1 }}>{regionLabel(s.region)} · {s.zone}</div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-                      <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{s._count.employees} staff</span>
-                      <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{s._count.terminalsAsOrigin} terminals</span>
+                      <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{s.counts.employees} staff</span>
+                      <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{s.counts.terminalsAsOrigin} terminals</span>
                     </div>
                     <ChevronRight size={14} color="var(--muted-foreground)" style={{ marginLeft: 8, flexShrink: 0 }} />
                   </button>

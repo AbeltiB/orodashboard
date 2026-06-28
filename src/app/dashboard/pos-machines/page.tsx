@@ -1,115 +1,72 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Monitor, Plus, Pencil, Trash2, X, Check, Search,
   AlertCircle, MapPin, User, ChevronRight, Clock,
   History, Info, ArrowRightLeft,
 } from "lucide-react";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types matching the POS API ───────────────────────────────────────────────
 
-type POSStatus = "Active" | "Idle" | "Maintenance" | "Decommissioned";
+type APIStatus = "ACTIVE" | "IDLE" | "MAINTENANCE" | "DECOMMISSIONED";
+const API_STATUSES: APIStatus[] = ["ACTIVE", "IDLE", "MAINTENANCE", "DECOMMISSIONED"];
+
+function statusLabel(s: APIStatus) {
+  return s.charAt(0) + s.slice(1).toLowerCase();
+}
 
 type AssignmentEntry = {
   id: string;
-  employeeId: string;
-  employeeName: string;
-  stationId: string;
-  stationName: string;
-  from: string;       // ISO date
-  to: string | null;  // null = current
-  remark: string;
+  employeeId?: string | null;
+  employeeName?: string | null;
+  stationId?: string | null;
+  stationName?: string | null;
+  from: string;
+  to: string | null;
+  remark?: string | null;
 };
 
-type POSMachine = {
+type PosMachine = {
   id: string;
+  code: string;
   make: string;
   model: string;
   serial: string;
-  status: POSStatus;
+  status: APIStatus;
   appVersion: string;
-  currentEmployeeId: string;
-  currentEmployeeName: string;
-  currentStationId: string;
-  currentStationName: string;
-  remark: string;
-  assignmentHistory: AssignmentEntry[];
+  remark?: string | null;
+  stationId?: string | null;
+  station?: { id: string; name: string; code: string } | null;
+  employeeId?: string | null;
+  employee?: { id: string; code: string; name: string } | null;
+  history: AssignmentEntry[];
 };
 
-// ─── Seed data ────────────────────────────────────────────────────────────────
+type StationOption = { id: string; name: string; code: string };
+type EmployeeOption = { id: string; name: string; code: string; stationId?: string | null };
 
-const STATIONS = [
-  { id: "STN-001", name: "Meskel Square Terminal" },
-  { id: "STN-002", name: "Bole Station" },
-  { id: "STN-003", name: "Piassa Hub" },
-];
-
-const EMPLOYEES = [
-  { id: "EMP-001", name: "Abebe Girma",   stationId: "STN-001" },
-  { id: "EMP-002", name: "Tigist Haile",  stationId: "STN-001" },
-  { id: "EMP-003", name: "Dawit Tesfaye", stationId: "STN-002" },
-  { id: "EMP-004", name: "Sara Kebede",   stationId: "STN-003" },
-];
+// ─── Static options ───────────────────────────────────────────────────────────
 
 const MAKES = ["Verifone", "PAX Technology", "Ingenico", "Newland", "BBPOS", "Other"];
 const APP_VERSIONS = ["ORO Ticket v2.4.1", "ORO Ticket v2.3.8", "ORO Ticket v2.2.5", "ORO Ticket v2.1.0"];
 
-const SEED: POSMachine[] = [
-  {
-    id: "POS-001",
-    make: "Verifone", model: "V240m", serial: "VFN-240M-AA001",
-    status: "Active", appVersion: "ORO Ticket v2.4.1",
-    currentEmployeeId: "EMP-001", currentEmployeeName: "Abebe Girma",
-    currentStationId: "STN-001",  currentStationName: "Meskel Square Terminal",
-    remark: "Primary station POS. Handle with care.",
-    assignmentHistory: [
-      { id: "h1", employeeId: "EMP-003", employeeName: "Dawit Tesfaye",  stationId: "STN-002", stationName: "Bole Station",            from: "2023-01-10", to: "2023-08-15", remark: "Initial deployment" },
-      { id: "h2", employeeId: "EMP-002", employeeName: "Tigist Haile",   stationId: "STN-001", stationName: "Meskel Square Terminal",  from: "2023-08-16", to: "2024-02-28", remark: "Transferred after Bole expansion" },
-      { id: "h3", employeeId: "EMP-001", employeeName: "Abebe Girma",    stationId: "STN-001", stationName: "Meskel Square Terminal",  from: "2024-03-01", to: null,         remark: "" },
-    ],
-  },
-  {
-    id: "POS-002",
-    make: "PAX Technology", model: "A920", serial: "PAX-A920-AA002",
-    status: "Active", appVersion: "ORO Ticket v2.4.1",
-    currentEmployeeId: "EMP-002", currentEmployeeName: "Tigist Haile",
-    currentStationId: "STN-001",  currentStationName: "Meskel Square Terminal",
-    remark: "",
-    assignmentHistory: [
-      { id: "h4", employeeId: "EMP-002", employeeName: "Tigist Haile", stationId: "STN-001", stationName: "Meskel Square Terminal", from: "2023-06-01", to: null, remark: "New unit" },
-    ],
-  },
-  {
-    id: "POS-003",
-    make: "Ingenico", model: "Move 5000", serial: "ING-MV5K-AA003",
-    status: "Maintenance", appVersion: "ORO Ticket v2.3.8",
-    currentEmployeeId: "", currentEmployeeName: "",
-    currentStationId: "STN-002", currentStationName: "Bole Station",
-    remark: "Screen cracked. Sent for repair 2025-01-10. ETA 2 weeks.",
-    assignmentHistory: [
-      { id: "h5", employeeId: "EMP-003", employeeName: "Dawit Tesfaye", stationId: "STN-002", stationName: "Bole Station", from: "2022-11-01", to: "2025-01-09", remark: "Dropped — screen damage" },
-    ],
-  },
-  {
-    id: "POS-004",
-    make: "Verifone", model: "V240m", serial: "VFN-240M-AA004",
-    status: "Idle", appVersion: "ORO Ticket v2.2.5",
-    currentEmployeeId: "", currentEmployeeName: "",
-    currentStationId: "STN-003", currentStationName: "Piassa Hub",
-    remark: "Spare unit. Needs app update before deployment.",
-    assignmentHistory: [],
-  },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function uid() { return Math.random().toString(36).slice(2, 9); }
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error ?? `Request failed: ${res.status}`);
+  return json as T;
+}
 
-function statusStyle(s: POSStatus): { bg: string; fg: string } {
-  return s === "Active"          ? { bg: "#dcfce7", fg: "#16a34a" }
-       : s === "Idle"            ? { bg: "#fef3c7", fg: "#d97706" }
-       : s === "Maintenance"     ? { bg: "#fee2e2", fg: "#dc2626" }
+function statusStyle(s: APIStatus): { bg: string; fg: string } {
+  return s === "ACTIVE"          ? { bg: "#dcfce7", fg: "#16a34a" }
+       : s === "IDLE"            ? { bg: "#fef3c7", fg: "#d97706" }
+       : s === "MAINTENANCE"     ? { bg: "#fee2e2", fg: "#dc2626" }
        :                           { bg: "#f1f5f9", fg: "#64748b" };
 }
 
@@ -176,54 +133,96 @@ function Modal({ title, wide, onClose, children }: { title: string; wide?: boole
 
 // ─── POS Form Modal ───────────────────────────────────────────────────────────
 
-function POSFormModal({ initial, onSave, onClose }: { initial?: POSMachine; onSave: (p: POSMachine) => void; onClose: () => void }) {
-  const blank: POSMachine = {
-    id: "", make: "", model: "", serial: "", status: "Active",
+type PosFormData = {
+  make: string;
+  model: string;
+  serial: string;
+  status: APIStatus;
+  appVersion: string;
+  stationId: string;
+  employeeId: string;
+  remark: string;
+};
+
+function POSFormModal({
+  initial,
+  stations,
+  employees,
+  onSaved,
+  onClose,
+}: {
+  initial?: PosMachine;
+  stations: StationOption[];
+  employees: EmployeeOption[];
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const blank: PosFormData = {
+    make: "", model: "", serial: "", status: "ACTIVE",
     appVersion: APP_VERSIONS[0],
-    currentEmployeeId: "", currentEmployeeName: "",
-    currentStationId: "", currentStationName: "",
-    remark: "", assignmentHistory: [],
+    stationId: "", employeeId: "", remark: "",
   };
-  const [form, setForm] = useState<POSMachine>(initial ?? blank);
-  const [addingAssignment, setAddingAssignment] = useState(false);
+  const [form, setForm] = useState<PosFormData>({
+    make: initial?.make ?? "",
+    model: initial?.model ?? "",
+    serial: initial?.serial ?? "",
+    status: initial?.status ?? "ACTIVE",
+    appVersion: initial?.appVersion ?? APP_VERSIONS[0],
+    stationId: initial?.stationId ?? "",
+    employeeId: initial?.employeeId ?? "",
+    remark: initial?.remark ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
 
-  const set = <K extends keyof POSMachine>(k: K, v: POSMachine[K]) => setForm(f => ({ ...f, [k]: v }));
+  const set = <K extends keyof PosFormData>(k: K, v: PosFormData[K]) => setForm(f => ({ ...f, [k]: v }));
 
-  const filteredEmployees = EMPLOYEES.filter(e => !form.currentStationId || e.stationId === form.currentStationId);
+  const filteredEmployees = employees.filter(e => !form.stationId || e.stationId === form.stationId);
   const valid = form.make.trim() && form.model.trim() && form.serial.trim();
 
-  function save() {
-    if (!valid) return;
-    const station  = STATIONS.find(s => s.id === form.currentStationId);
-    const employee = EMPLOYEES.find(e => e.id === form.currentEmployeeId);
-    // If current assignment changed, close previous open entry and add new
-    let history = form.assignmentHistory;
-    if (form.currentStationId || form.currentEmployeeId) {
-      const lastOpen = history.find(h => h.to === null);
-      const sameAssignment = lastOpen?.employeeId === form.currentEmployeeId && lastOpen?.stationId === form.currentStationId;
-      if (!sameAssignment) {
-        history = history.map(h => h.to === null ? { ...h, to: new Date().toISOString().slice(0, 10) } : h);
-        if (form.currentStationId || form.currentEmployeeId) {
-          history = [...history, {
-            id: uid(),
-            employeeId: form.currentEmployeeId,
-            employeeName: employee?.name ?? form.currentEmployeeName,
-            stationId: form.currentStationId,
-            stationName: station?.name ?? form.currentStationName,
-            from: new Date().toISOString().slice(0, 10),
-            to: null,
-            remark: "",
-          }];
+  async function save() {
+    if (!valid || saving) return;
+    setSaving(true); setError(null);
+    try {
+      const payload = {
+        make: form.make.trim(),
+        model: form.model.trim(),
+        serial: form.serial.trim().toUpperCase(),
+        status: form.status,
+        appVersion: form.appVersion,
+        remark: form.remark.trim() || undefined,
+        stationId: form.stationId || undefined,
+        employeeId: form.employeeId || undefined,
+      };
+
+      let savedId = initial?.id;
+      if (initial) {
+        await apiFetch(`/api/pos-machines/${initial.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        const assignChanged =
+          form.stationId !== (initial.stationId ?? "") ||
+          form.employeeId !== (initial.employeeId ?? "");
+        if (assignChanged && savedId) {
+          await apiFetch(`/api/pos-machines/${savedId}/assign`, {
+            method: "POST",
+            body: JSON.stringify({
+              employeeId: form.employeeId || null,
+              stationId: form.stationId || null,
+              fromDate: new Date().toISOString().slice(0, 10),
+              remark: "",
+            }),
+          });
         }
+      } else {
+        const created = await apiFetch<{ id: string }>("/api/pos-machines", { method: "POST", body: JSON.stringify(payload) });
+        savedId = created.id;
       }
+
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setSaving(false);
     }
-    onSave({
-      ...form,
-      id: form.id || `POS-${String(Date.now()).slice(-4)}`,
-      currentStationName: station?.name ?? "",
-      currentEmployeeName: employee?.name ?? "",
-      assignmentHistory: history,
-    });
   }
 
   return (
@@ -242,11 +241,8 @@ function POSFormModal({ initial, onSave, onClose }: { initial?: POSMachine; onSa
           <input style={{ ...iCss, fontFamily: "monospace", letterSpacing: "0.06em" }} value={form.serial} onChange={e => set("serial", e.target.value.toUpperCase())} placeholder="XXX-XXXX-XXXXX" />
         </Field>
         <Field label="Status">
-          <select style={selCss} value={form.status} onChange={e => set("status", e.target.value as POSStatus)}>
-            <option value="Active">Active</option>
-            <option value="Idle">Idle</option>
-            <option value="Maintenance">Maintenance</option>
-            <option value="Decommissioned">Decommissioned</option>
+          <select style={selCss} value={form.status} onChange={e => set("status", e.target.value as APIStatus)}>
+            {API_STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
           </select>
         </Field>
         <Field label="ORO Ticket app version">
@@ -261,15 +257,15 @@ function POSFormModal({ initial, onSave, onClose }: { initial?: POSMachine; onSa
         </div>
 
         <Field label="Station">
-          <select style={selCss} value={form.currentStationId} onChange={e => { set("currentStationId", e.target.value); set("currentEmployeeId", ""); set("currentEmployeeName", ""); }}>
+          <select style={selCss} value={form.stationId} onChange={e => { set("stationId", e.target.value); set("employeeId", ""); }}>
             <option value="">Unassigned</option>
-            {STATIONS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </Field>
         <Field label="Assigned to (employee)">
-          <select style={selCss} value={form.currentEmployeeId} onChange={e => set("currentEmployeeId", e.target.value)} disabled={!form.currentStationId}>
+          <select style={selCss} value={form.employeeId} onChange={e => set("employeeId", e.target.value)} disabled={!form.stationId}>
             <option value="">Unassigned</option>
-            {filteredEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            {filteredEmployees.map(e => <option key={e.id} value={e.id}>{e.code} — {e.name}</option>)}
           </select>
         </Field>
 
@@ -278,9 +274,17 @@ function POSFormModal({ initial, onSave, onClose }: { initial?: POSMachine; onSa
         </Field>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fee2e2", borderRadius: 8, marginTop: 14, marginBottom: 4 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
         <button onClick={onClose} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
-        <button onClick={save} disabled={!valid} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: valid ? 1 : 0.5 }}>
+        <button onClick={save} disabled={!valid || saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: valid && !saving ? 1 : 0.5, display: "flex", alignItems: "center", gap: 7 }}>
+          {saving && <span style={{ width: 16, height: 16, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite", display: "inline-block" }} />}
           {initial ? "Save changes" : "Register machine"}
         </button>
       </div>
@@ -290,30 +294,45 @@ function POSFormModal({ initial, onSave, onClose }: { initial?: POSMachine; onSa
 
 // ─── Reassign Modal ───────────────────────────────────────────────────────────
 
-function ReassignModal({ pos, onSave, onClose }: { pos: POSMachine; onSave: (p: POSMachine) => void; onClose: () => void }) {
-  const [stationId,   setStationId]   = useState(pos.currentStationId);
-  const [employeeId,  setEmployeeId]  = useState(pos.currentEmployeeId);
-  const [remark,      setRemark]      = useState("");
-  const filteredEmployees = EMPLOYEES.filter(e => !stationId || e.stationId === stationId);
+function ReassignModal({
+  pos,
+  stations,
+  employees,
+  onSaved,
+  onClose,
+}: {
+  pos: PosMachine;
+  stations: StationOption[];
+  employees: EmployeeOption[];
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const [stationId,  setStationId]  = useState(pos.stationId ?? "");
+  const [employeeId, setEmployeeId] = useState(pos.employeeId ?? "");
+  const [remark,     setRemark]     = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
 
-  function save() {
-    const station  = STATIONS.find(s => s.id === stationId);
-    const employee = EMPLOYEES.find(e => e.id === employeeId);
-    const today = new Date().toISOString().slice(0, 10);
-    const history = [
-      ...pos.assignmentHistory.map(h => h.to === null ? { ...h, to: today } : h),
-      {
-        id: uid(),
-        employeeId:    employee?.id    ?? "",
-        employeeName:  employee?.name  ?? "",
-        stationId:     station?.id     ?? "",
-        stationName:   station?.name   ?? "",
-        from: today,
-        to: null,
-        remark,
-      },
-    ];
-    onSave({ ...pos, currentStationId: stationId, currentStationName: station?.name ?? "", currentEmployeeId: employeeId, currentEmployeeName: employee?.name ?? "", assignmentHistory: history });
+  const filteredEmployees = employees.filter(e => !stationId || e.stationId === stationId);
+
+  async function save() {
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/pos-machines/${pos.id}/assign`, {
+        method: "POST",
+        body: JSON.stringify({
+          employeeId: employeeId || null,
+          stationId: stationId || null,
+          fromDate: new Date().toISOString().slice(0, 10),
+          remark,
+        }),
+      });
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Reassignment failed.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -324,21 +343,32 @@ function ReassignModal({ pos, onSave, onClose }: { pos: POSMachine; onSave: (p: 
       <Field label="New station">
         <select style={selCss} value={stationId} onChange={e => { setStationId(e.target.value); setEmployeeId(""); }}>
           <option value="">Unassigned</option>
-          {STATIONS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </Field>
       <Field label="Assign to employee">
         <select style={selCss} value={employeeId} onChange={e => setEmployeeId(e.target.value)} disabled={!stationId}>
           <option value="">Unassigned</option>
-          {filteredEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          {filteredEmployees.map(e => <option key={e.id} value={e.id}>{e.code} — {e.name}</option>)}
         </select>
       </Field>
       <Field label="Reason / remark">
         <textarea style={taCss} value={remark} onChange={e => setRemark(e.target.value)} placeholder="Transfer reason, condition notes…" />
       </Field>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fee2e2", borderRadius: 8, marginTop: 4, marginBottom: 4 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
         <button onClick={onClose} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
-        <button onClick={save} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Confirm reassignment</button>
+        <button onClick={save} disabled={saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: saving ? 0.6 : 1, display: "flex", alignItems: "center", gap: 7 }}>
+          {saving && <span style={{ width: 16, height: 16, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite", display: "inline-block" }} />}
+          Confirm reassignment
+        </button>
       </div>
     </Modal>
   );
@@ -369,23 +399,31 @@ function DeleteModal({ serial, onConfirm, onClose }: { serial: string; onConfirm
 
 type Tab = "current" | "history";
 
-function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
-  pos: POSMachine;
+function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
+  pos: PosMachine;
   onEdit: () => void;
   onDelete: () => void;
   onReassign: () => void;
-  onUpdate: (p: POSMachine) => void;
+  onReload: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("current");
   const ss = statusStyle(pos.status);
 
   // inline remark edit
   const [editingRemark, setEditingRemark] = useState(false);
-  const [remarkDraft,   setRemarkDraft]   = useState(pos.remark);
+  const [remarkDraft,   setRemarkDraft]   = useState(pos.remark ?? "");
 
-  function saveRemark() {
-    onUpdate({ ...pos, remark: remarkDraft });
-    setEditingRemark(false);
+  async function saveRemark() {
+    try {
+      await apiFetch(`/api/pos-machines/${pos.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ remark: remarkDraft }),
+      });
+      setEditingRemark(false);
+      onReload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to save remark.");
+    }
   }
 
   function TabBtn({ id, label, count }: { id: Tab; label: string; count?: number }) {
@@ -425,7 +463,7 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
             <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--foreground)", margin: 0, fontFamily: "monospace" }}>{pos.serial}</h2>
             <div style={{ fontSize: 14, color: "var(--muted-foreground)", marginTop: 2 }}>{pos.make} {pos.model}</div>
             <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-              <Badge label={pos.status} bg={ss.bg} fg={ss.fg} />
+              <Badge label={statusLabel(pos.status)} bg={ss.bg} fg={ss.fg} />
               <Badge
                 label={pos.appVersion}
                 bg={isOutdated ? "#fef3c7" : "#dbeafe"}
@@ -452,12 +490,12 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
         {/* Stats row */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
           {[
-            { label: "Station",       value: pos.currentStationName  || "Unassigned",        icon: <MapPin size={13} /> },
-            { label: "Operator",      value: pos.currentEmployeeName || "Unassigned",         icon: <User size={13} /> },
-            { label: "Assignments",   value: `${pos.assignmentHistory.length} total`,          icon: <History size={13} /> },
+            { label: "Station",       value: pos.station?.name  || "Unassigned",        icon: <MapPin size={13} /> },
+            { label: "Operator",      value: pos.employee?.name || "Unassigned",         icon: <User size={13} /> },
+            { label: "Assignments",   value: `${pos.history.length} total`,          icon: <History size={13} /> },
           ].map(s => (
             <div key={s.label} style={{ background: "var(--background)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--muted-foreground)", fontSize: 11, marginBottom: 4 }}>{s.icon}{s.label}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--muted-foreground)", fontSize: 11, marginBottom: 4 }}>{s.icon} {s.label}</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.value}</div>
             </div>
           ))}
@@ -466,7 +504,7 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
         {/* Tab bar */}
         <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border)" }}>
           <TabBtn id="current" label="Current" />
-          <TabBtn id="history" label="Assignment history" count={pos.assignmentHistory.length} />
+          <TabBtn id="history" label="Assignment history" count={pos.history.length} />
         </div>
       </div>
 
@@ -480,31 +518,31 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
             <InfoRow label="Make"          value={pos.make} />
             <InfoRow label="Model"         value={pos.model} />
             <InfoRow label="Serial number" value={pos.serial} mono />
-            <InfoRow label="Status"        value={pos.status} />
+            <InfoRow label="Status"        value={statusLabel(pos.status)} />
             <InfoRow label="App version"   value={pos.appVersion} accent={!isOutdated} />
 
             <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", marginBottom: 8, marginTop: 22 }}>Current assignment</p>
-            {pos.currentStationId || pos.currentEmployeeId ? (
+            {pos.station || pos.employee ? (
               <>
-                {pos.currentStationId && (
+                {pos.station && (
                   <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--background)", marginBottom: 8 }}>
                     <div style={{ width: 36, height: 36, borderRadius: 9, background: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <MapPin size={16} color="#1d4ed8" />
                     </div>
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{pos.currentStationName}</div>
-                      <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{pos.currentStationId}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{pos.station.name}</div>
+                      <div style={{ fontSize: 12, color: "var(--muted-foreground)", fontFamily: "monospace" }}>{pos.station.code}</div>
                     </div>
                   </div>
                 )}
-                {pos.currentEmployeeId && (
+                {pos.employee && (
                   <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--background)", marginBottom: 8 }}>
                     <div style={{ width: 36, height: 36, borderRadius: 9, background: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                       <User size={16} color="#16a34a" />
                     </div>
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{pos.currentEmployeeName}</div>
-                      <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{pos.currentEmployeeId}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{pos.employee.name}</div>
+                      <div style={{ fontSize: 12, color: "var(--muted-foreground)", fontFamily: "monospace" }}>{pos.employee.code}</div>
                     </div>
                   </div>
                 )}
@@ -521,7 +559,7 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
                 <textarea style={{ ...taCss, height: 90 }} value={remarkDraft} onChange={e => setRemarkDraft(e.target.value)} autoFocus />
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   <button onClick={saveRemark} style={{ height: 34, padding: "0 16px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Save</button>
-                  <button onClick={() => { setEditingRemark(false); setRemarkDraft(pos.remark); }} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+                  <button onClick={() => { setEditingRemark(false); setRemarkDraft(pos.remark ?? ""); }} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
                 </div>
               </div>
             ) : (
@@ -535,7 +573,7 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
         {/* ── History ── */}
         {tab === "history" && (
           <div>
-            {pos.assignmentHistory.length === 0 ? (
+            {pos.history.length === 0 ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 0", color: "var(--muted-foreground)" }}>
                 <History size={32} style={{ marginBottom: 10, opacity: 0.25 }} />
                 <p style={{ fontSize: 13 }}>No assignment history yet.</p>
@@ -545,7 +583,7 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
                 {/* Vertical timeline line */}
                 <div style={{ position: "absolute", left: 18, top: 8, bottom: 8, width: 2, background: "var(--border)", borderRadius: 2 }} />
 
-                {[...pos.assignmentHistory].reverse().map((entry, i) => {
+                {[...pos.history].reverse().map((entry) => {
                   const isCurrent = entry.to === null;
                   return (
                     <div key={entry.id} style={{ display: "flex", gap: 16, marginBottom: 20, position: "relative" }}>
@@ -601,51 +639,124 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onUpdate }: {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-const STATUS_OPTIONS: (POSStatus | "All")[] = ["All", "Active", "Idle", "Maintenance", "Decommissioned"];
-
 export default function POSMachinesPage() {
-  const [machines,  setMachines]  = useState<POSMachine[]>(SEED);
-  const [selected,  setSelected]  = useState<string | null>(SEED[0].id);
+  const [machines,  setMachines]  = useState<PosMachine[]>([]);
+  const [selected,  setSelected]  = useState<string | null>(null);
+  const [activeDetail, setActiveDetail] = useState<PosMachine | null>(null);
+  const [stations,  setStations]  = useState<StationOption[]>([]);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState("");
-  const [filterSt,  setFilterSt]  = useState<POSStatus | "All">("All");
+  const [filterSt,  setFilterSt]  = useState<APIStatus | "All">("All");
   const [filterStation, setFilterStation] = useState("All");
   const [modal,     setModal]     = useState<"create" | "edit" | "delete" | "reassign" | null>(null);
   const [toast,     setToast]     = useState<string | null>(null);
 
-  const filtered = machines.filter(m => {
-    const term = search.toLowerCase();
-    const nameMatch = m.serial.toLowerCase().includes(term) || m.make.toLowerCase().includes(term) || m.model.toLowerCase().includes(term) || m.id.toLowerCase().includes(term);
-    const stMatch   = filterSt === "All" || m.status === filterSt;
-    const stationMatch = filterStation === "All" || m.currentStationId === filterStation;
-    return nameMatch && stMatch && stationMatch;
-  });
+  const loadMachines = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ data: PosMachine[] }>("/api/pos-machines");
+      setMachines(res.data);
+    } catch (e) { console.error(e); }
+  }, []);
 
-  const active = machines.find(m => m.id === selected) ?? null;
+  const loadStations = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ data: StationOption[] }>("/api/stations?limit=1000");
+      setStations(res.data);
+    } catch (e) { console.error(e); }
+  }, []);
 
-  function upsert(p: POSMachine) {
-    setMachines(prev => {
-      const idx = prev.findIndex(x => x.id === p.id);
-      if (idx >= 0) { const n = [...prev]; n[idx] = p; return n; }
-      return [...prev, p];
+  const loadEmployees = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ data: { id: string; code: string; fullName: string; stationId?: string | null }[] }>("/api/employees?limit=1000");
+      setEmployees(res.data.map(e => ({ id: e.id, code: e.code, name: e.fullName, stationId: e.stationId })));
+    } catch (e) { console.error(e); }
+  }, []);
+
+  const loadActiveDetail = useCallback(async (id: string) => {
+    try {
+      const res = await apiFetch<Omit<PosMachine, "history"> & {
+        history: {
+          id: string;
+          employee: { id: string; code: string; name: string } | null;
+          employeeName: string | null;
+          station: { id: string; code: string; name: string } | null;
+          stationName: string | null;
+          fromDate: string;
+          toDate: string | null;
+          remark: string | null;
+        }[];
+      }>(`/api/pos-machines/${id}`);
+      const mapped: PosMachine = {
+        ...res,
+        history: res.history.map(h => ({
+          id: h.id,
+          employeeId: h.employee?.id ?? null,
+          employeeName: h.employee?.name ?? h.employeeName,
+          stationId: h.station?.id ?? null,
+          stationName: h.station?.name ?? h.stationName,
+          from: h.fromDate,
+          to: h.toDate,
+          remark: h.remark,
+        })),
+      };
+      setActiveDetail(mapped);
+    } catch (e) {
+      setActiveDetail(null);
+      console.error(e);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([loadMachines(), loadStations(), loadEmployees()]).finally(() => {
+      if (!cancelled) setLoading(false);
     });
-    setSelected(p.id);
-    setToast(modal === "create" ? `${p.serial} registered` : modal === "reassign" ? `${p.serial} reassigned` : `${p.serial} updated`);
+    return () => { cancelled = true; };
+  }, [loadMachines, loadStations, loadEmployees]);
+
+  useEffect(() => {
+    if (selected) loadActiveDetail(selected);
+    else setActiveDetail(null);
+  }, [selected, loadActiveDetail]);
+
+  const filtered = useMemo(() => machines.filter(m => {
+    const term = search.toLowerCase();
+    const nameMatch = m.serial.toLowerCase().includes(term) || m.make.toLowerCase().includes(term) || m.model.toLowerCase().includes(term) || m.code.toLowerCase().includes(term);
+    const stMatch   = filterSt === "All" || m.status === filterSt;
+    const stationMatch = filterStation === "All" || m.stationId === filterStation;
+    return nameMatch && stMatch && stationMatch;
+  }), [machines, search, filterSt, filterStation]);
+
+  async function handleSaved() {
+    await loadMachines();
+    if (selected) await loadActiveDetail(selected);
+    setToast(modal === "create" ? "POS machine registered" : modal === "reassign" ? "POS machine reassigned" : "POS machine updated");
     setModal(null);
   }
 
-  function deleteActive() {
-    if (!active) return;
-    setMachines(prev => prev.filter(m => m.id !== active.id));
-    setSelected(machines.find(m => m.id !== active.id)?.id ?? null);
-    setToast(`${active.serial} removed`);
+  async function handleDelete() {
+    if (!activeDetail) return;
+    try {
+      await apiFetch(`/api/pos-machines/${activeDetail.id}`, { method: "DELETE" });
+      await loadMachines();
+      setSelected(null);
+      setActiveDetail(null);
+      setToast("POS machine removed");
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Delete failed");
+    }
     setModal(null);
   }
+
+  const active = activeDetail;
 
   // Summary counts
   const counts = {
-    active:      machines.filter(m => m.status === "Active").length,
-    idle:        machines.filter(m => m.status === "Idle").length,
-    maintenance: machines.filter(m => m.status === "Maintenance").length,
+    active:      machines.filter(m => m.status === "ACTIVE").length,
+    idle:        machines.filter(m => m.status === "IDLE").length,
+    maintenance: machines.filter(m => m.status === "MAINTENANCE").length,
     outdated:    machines.filter(m => m.appVersion !== APP_VERSIONS[0]).length,
   };
 
@@ -653,14 +764,15 @@ export default function POSMachinesPage() {
     <>
       <style>{`
         @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
         * { box-sizing:border-box; }
       `}</style>
 
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
-      {modal === "create"   && <POSFormModal onSave={upsert} onClose={() => setModal(null)} />}
-      {modal === "edit"     && active && <POSFormModal initial={active} onSave={upsert} onClose={() => setModal(null)} />}
-      {modal === "delete"   && active && <DeleteModal serial={active.serial} onConfirm={deleteActive} onClose={() => setModal(null)} />}
-      {modal === "reassign" && active && <ReassignModal pos={active} onSave={upsert} onClose={() => setModal(null)} />}
+      {modal === "create"   && <POSFormModal stations={stations} employees={employees} onSaved={handleSaved} onClose={() => setModal(null)} />}
+      {modal === "edit"     && active && <POSFormModal initial={active} stations={stations} employees={employees} onSaved={handleSaved} onClose={() => setModal(null)} />}
+      {modal === "delete"   && active && <DeleteModal serial={active.serial} onConfirm={handleDelete} onClose={() => setModal(null)} />}
+      {modal === "reassign" && active && <ReassignModal pos={active} stations={stations} employees={employees} onSaved={handleSaved} onClose={() => setModal(null)} />}
 
       <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--background)", overflow: "hidden" }}>
 
@@ -670,7 +782,7 @@ export default function POSMachinesPage() {
             <div>
               <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>POS Machines</h1>
               <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "3px 0 0" }}>
-                {machines.length} machines · {counts.active} active · {counts.idle} idle · {counts.maintenance} in maintenance
+                {loading ? "Loading…" : `${machines.length} machines · ${counts.active} active · ${counts.idle} idle · ${counts.maintenance} in maintenance`}
                 {counts.outdated > 0 && <span style={{ color: "#d97706", fontWeight: 600 }}> · {counts.outdated} need app update</span>}
               </p>
             </div>
@@ -693,19 +805,23 @@ export default function POSMachinesPage() {
                   style={{ ...iCss, paddingLeft: 32, height: 36, fontSize: 13 }} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <select style={{ ...selCss, height: 34, fontSize: 12 }} value={filterSt} onChange={e => setFilterSt(e.target.value as POSStatus | "All")}>
-                  {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s === "All" ? "All statuses" : s}</option>)}
+                <select style={{ ...selCss, height: 34, fontSize: 12 }} value={filterSt} onChange={e => setFilterSt(e.target.value as APIStatus | "All")}>
+                  <option value="All">All statuses</option>
+                  {API_STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                 </select>
                 <select style={{ ...selCss, height: 34, fontSize: 12 }} value={filterStation} onChange={e => setFilterStation(e.target.value)}>
                   <option value="All">All stations</option>
-                  {STATIONS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
             </div>
 
             {/* Machine list */}
             <div style={{ flex: 1, overflowY: "auto" }}>
-              {filtered.length === 0 && (
+              {loading && filtered.length === 0 && (
+                <div style={{ padding: 40, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>Loading machines…</div>
+              )}
+              {!loading && filtered.length === 0 && (
                 <div style={{ padding: 24, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>No machines match your filters.</div>
               )}
               {filtered.map(m => {
@@ -730,7 +846,7 @@ export default function POSMachinesPage() {
                       <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 1 }}>{m.make} {m.model}</div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0, marginLeft: 8 }}>
-                      <Badge label={m.status} bg={ss.bg} fg={ss.fg} />
+                      <Badge label={statusLabel(m.status)} bg={ss.bg} fg={ss.fg} />
                       {outdated && <span style={{ fontSize: 10, color: "#d97706", fontWeight: 600 }}>outdated</span>}
                     </div>
                     <ChevronRight size={14} color="var(--muted-foreground)" style={{ marginLeft: 6, flexShrink: 0 }} />
@@ -748,7 +864,7 @@ export default function POSMachinesPage() {
                   onEdit={() => setModal("edit")}
                   onDelete={() => setModal("delete")}
                   onReassign={() => setModal("reassign")}
-                  onUpdate={updated => setMachines(prev => prev.map(m => m.id === updated.id ? updated : m))}
+                  onReload={() => selected && loadActiveDetail(selected)}
                 />
               : (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--muted-foreground)" }}>

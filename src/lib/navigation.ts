@@ -1,6 +1,7 @@
 import {
   Home,
   MapPinned,
+  Building2,
   Users,
   CreditCard,
   FileBarChart,
@@ -19,6 +20,12 @@ export const navigation = [
     title: "Stations",
     href: "/dashboard/stations",
     icon: MapPinned,
+  },
+
+  {
+    title: "Terminals",
+    href: "/dashboard/terminals",
+    icon: Building2,
   },
 
   {

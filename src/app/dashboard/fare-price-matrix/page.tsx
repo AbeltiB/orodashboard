@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Check, Pencil, X, Calculator, Bus, RefreshCw, Info } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Check, Pencil, X, Calculator, Bus, RefreshCw, Info, AlertCircle, Loader2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RoadType  = "asphalt" | "gravel";
 type BusTypeId = "bus" | "midbus" | "minibus";
+type APILevel  = "LEVEL_1" | "LEVEL_2" | "LEVEL_3";
 
 type LevelRates = {
   asphaltRate: number;
@@ -17,9 +18,10 @@ type BusTypeMatrix = {
   id:          BusTypeId;
   label:       string;
   description: string;
-  icon:        string;         // emoji stand-in — swap for your own SVG
+  icon:        string;
   color:       string;
   lightColor:  string;
+  apiKey:      string;
   levels: {
     1: LevelRates;
     2: LevelRates;
@@ -27,37 +29,26 @@ type BusTypeMatrix = {
   };
 };
 
-// ─── Seed matrix — 3 types × 3 levels × 2 roads = 18 rates ──────────────────
+// ─── Static bus-type metadata (rates come from /api/fare-matrix) ──────────────
 
-const INITIAL_MATRIX: BusTypeMatrix[] = [
+const BUS_TYPE_META: Omit<BusTypeMatrix, "levels">[] = [
   {
     id: "bus", label: "Bus", description: "Full-size (45+ seats)",
-    icon: "🚌", color: "#2563eb", lightColor: "#dbeafe",
-    levels: {
-      1: { asphaltRate: 0.85, gravelRate: 1.10 },
-      2: { asphaltRate: 1.20, gravelRate: 1.55 },
-      3: { asphaltRate: 1.65, gravelRate: 2.05 },
-    },
+    icon: "🚌", color: "#2563eb", lightColor: "#dbeafe", apiKey: "BUS",
   },
   {
     id: "midbus", label: "Midbus", description: "Mid-size (25–44 seats)",
-    icon: "🚐", color: "#7c3aed", lightColor: "#ede9fe",
-    levels: {
-      1: { asphaltRate: 1.05, gravelRate: 1.35 },
-      2: { asphaltRate: 1.45, gravelRate: 1.80 },
-      3: { asphaltRate: 1.90, gravelRate: 2.30 },
-    },
+    icon: "🚐", color: "#7c3aed", lightColor: "#ede9fe", apiKey: "MIDBUS",
   },
   {
     id: "minibus", label: "Minibus", description: "Mini (up to 24 seats)",
-    icon: "🚙", color: "#0369a1", lightColor: "#e0f2fe",
-    levels: {
-      1: { asphaltRate: 1.30, gravelRate: 1.60 },
-      2: { asphaltRate: 1.75, gravelRate: 2.10 },
-      3: { asphaltRate: 2.20, gravelRate: 2.65 },
-    },
+    icon: "🚙", color: "#0369a1", lightColor: "#e0f2fe", apiKey: "MINIBUS",
   },
 ];
+
+function levelApiKey(level: 1 | 2 | 3): APILevel {
+  return `LEVEL_${level}`;
+}
 
 const LEVEL_META: { id: 1|2|3; label: string; desc: string }[] = [
   { id: 1, label: "Level 1", desc: "Standard"  },
@@ -81,6 +72,43 @@ function fmt(n: number) {
 function fmtR(n: number) { return n.toFixed(2); }
 function calcFare(rates: LevelRates, akm: number, gkm: number) {
   return rates.asphaltRate * akm + rates.gravelRate * gkm;
+}
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error ?? `Request failed: ${res.status}`);
+  return json as T;
+}
+
+function buildMatrixFromAPI(
+  apiMatrix: Record<string, Record<string, { asphaltRate: number; gravelRate: number }>>
+): BusTypeMatrix[] {
+  return BUS_TYPE_META.map(bt => {
+    const apiLevels = apiMatrix[bt.apiKey] ?? {};
+    return {
+      ...bt,
+      levels: {
+        1: apiLevels["LEVEL_1"] ?? { asphaltRate: 0, gravelRate: 0 },
+        2: apiLevels["LEVEL_2"] ?? { asphaltRate: 0, gravelRate: 0 },
+        3: apiLevels["LEVEL_3"] ?? { asphaltRate: 0, gravelRate: 0 },
+      },
+    };
+  });
+}
+
+function buildRowsFromMatrix(matrix: BusTypeMatrix[]) {
+  return matrix.flatMap(bt =>
+    ([1, 2, 3] as const).map(level => ({
+      busType: bt.apiKey,
+      busLevel: levelApiKey(level),
+      asphaltRate: bt.levels[level].asphaltRate,
+      gravelRate: bt.levels[level].gravelRate,
+    }))
+  );
 }
 
 // ─── Inline-editable rate cell ────────────────────────────────────────────────
@@ -321,12 +349,32 @@ function FareCalculator({ matrix }: { matrix: BusTypeMatrix[] }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function FarePriceMatrixPage() {
-  const [matrix,     setMatrix]     = useState<BusTypeMatrix[]>(INITIAL_MATRIX);
+  const [matrix,     setMatrix]     = useState<BusTypeMatrix[]>([]);
   const [activeType, setActiveType] = useState<BusTypeId>("bus");
   const [saved,      setSaved]      = useState(false);
   const [changed,    setChanged]    = useState(false);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState<string | null>(null);
 
-  const activeBT = matrix.find(bt => bt.id === activeType)!;
+  const loadMatrix = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiFetch<{ matrix: Record<string, Record<string, { asphaltRate: number; gravelRate: number }>> }>("/api/fare-matrix");
+      setMatrix(buildMatrixFromAPI(res.matrix));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load fare matrix.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadMatrix(); }, [loadMatrix]);
+
+  const activeBT = matrix.find(bt => bt.id === activeType) ?? matrix[0] ?? {
+    ...BUS_TYPE_META[0],
+    levels: { 1: { asphaltRate: 0, gravelRate: 0 }, 2: { asphaltRate: 0, gravelRate: 0 }, 3: { asphaltRate: 0, gravelRate: 0 } },
+  };
 
   function updateRate(btId: BusTypeId, level: 1|2|3, road: RoadType, value: number) {
     setMatrix(prev => prev.map(bt =>
@@ -338,15 +386,22 @@ export default function FarePriceMatrixPage() {
     setSaved(false);
   }
 
-  function handleSave() {
-    // wire to your API here
-    setSaved(true);
-    setChanged(false);
-    setTimeout(() => setSaved(false), 2400);
+  async function handleSave() {
+    try {
+      await apiFetch("/api/fare-matrix", {
+        method: "PUT",
+        body: JSON.stringify({ rows: buildRowsFromMatrix(matrix) }),
+      });
+      setSaved(true);
+      setChanged(false);
+      setTimeout(() => setSaved(false), 2400);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save matrix.");
+    }
   }
 
-  function handleReset() {
-    setMatrix(INITIAL_MATRIX);
+  async function handleReset() {
+    await loadMatrix();
     setChanged(false);
     setSaved(false);
   }
@@ -374,6 +429,24 @@ export default function FarePriceMatrixPage() {
           </button>
         </div>
       </div>
+
+      {loading && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "40px 0", color: "var(--muted-foreground)", fontSize: 13 }}>
+          <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> Loading fare matrix…
+        </div>
+      )}
+
+      {error && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "#fee2e2", borderRadius: 10, color: "#b91c1c", fontSize: 13, marginBottom: 20 }}>
+          <AlertCircle size={16} /> {error}
+        </div>
+      )}
+
+      {!loading && !error && matrix.length === 0 && (
+        <div style={{ padding: "60px 0", textAlign: "center", color: "var(--muted-foreground)", fontSize: 14 }}>
+          No fare matrix data found.
+        </div>
+      )}
 
       {/* ── Summary chips — quick glance at all 18 rates ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 28 }}>
