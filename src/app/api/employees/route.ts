@@ -15,6 +15,7 @@ import {
   serverError,
 } from "@/lib/api-utils";
 import { createEmployeeSchema } from "@/lib/schemas/employee";
+import { hasPermission } from "@/lib/permissions";
 
 const employeeInclude = {
   station: { select: { id: true, name: true, code: true } },
@@ -71,8 +72,11 @@ export async function GET(request: NextRequest) {
       prisma.employee.count({ where }),
     ]);
 
+    const includePosPassword =
+      auth.session.role === "SUPER_ADMIN" || hasPermission(auth.session.permissions, "employees", "edit");
+
     return ok({
-      data: employees.map(serializeEmployee),
+      data: employees.map((e) => serializeEmployee(e, { includePosPassword })),
       meta: { total, offset, limit, hasMore: offset + employees.length < total },
     });
   } catch (error) {
@@ -127,7 +131,8 @@ export async function POST(request: NextRequest) {
       include: employeeInclude,
     });
 
-    return created(serializeEmployee(employee));
+    // Echo back the record including the posPassword the caller just set.
+    return created(serializeEmployee(employee, { includePosPassword: true }));
   } catch (error) {
     return serverError(error);
   }

@@ -12,11 +12,11 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "ORO Dashboard",
-    template: "%s | ORO Dashboard",
+    default: "OroDashboard",
+    template: "%s | OroDashboard",
   },
-  description: "ORO Administration Dashboard",
-  applicationName: "ORO Dashboard",
+  description: "OroDashboard Administration Dashboard",
+  applicationName: "OroDashboard",
 };
 
 export default async function RootLayout({

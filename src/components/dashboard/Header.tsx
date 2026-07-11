@@ -110,6 +110,7 @@ export default function Header({
         <button
           className="lg:hidden"
           onClick={() => setMobileOpen(true)}
+          aria-label="Open menu"
         >
           <Menu />
         </button>
@@ -118,9 +119,12 @@ export default function Header({
           <Search
             className="absolute left-3 top-3 text-gray-400"
             size={18}
+            aria-hidden="true"
           />
 
+          <label htmlFor="dashboard-search" className="sr-only">Search</label>
           <input
+            id="dashboard-search"
             placeholder="Search..."
             className="input w-80 pl-10"
           />
@@ -133,6 +137,7 @@ export default function Header({
         <button
           onClick={toggleTheme}
           className="rounded-lg p-2 transition hover:bg-[var(--hover)]"
+          aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
         >
           {darkMode ? (
             <Sun size={20} />
@@ -142,7 +147,7 @@ export default function Header({
         </button>
 
         {/* Notifications */}
-        <button className="rounded-lg p-2 transition hover:bg-[var(--hover)]">
+        <button className="rounded-lg p-2 transition hover:bg-[var(--hover)]" aria-label="Notifications">
           <Bell size={20} />
         </button>
 
@@ -156,6 +161,9 @@ export default function Header({
               setProfileOpen(!profileOpen)
             }
             className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-[var(--hover)]"
+            aria-haspopup="menu"
+            aria-expanded={profileOpen}
+            aria-label={`Account menu for ${fullName}`}
           >
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--primary)] font-medium text-white">
               {initials}

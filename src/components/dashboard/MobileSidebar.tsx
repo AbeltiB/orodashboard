@@ -31,11 +31,12 @@ export default function MobileSidebar({
       <aside className="sidebar fixed left-0 top-0 z-50 h-screen w-72 p-4 lg:hidden">
         <div className="mb-8 flex items-center justify-between">
           <h1 className="text-xl font-bold">
-            ORO Dashboard
+            OroDashboard
           </h1>
 
           <button
             onClick={() => setOpen(false)}
+            aria-label="Close menu"
           >
             <X />
           </button>

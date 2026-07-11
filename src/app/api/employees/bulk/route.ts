@@ -118,15 +118,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Generate sequential codes up-front so each record gets a unique code.
+    // Reserve one code per employee via the atomic counter (sequential awaits,
+    // not computed locally) so a concurrent single-employee POST can never
+    // collide with a code this batch has already claimed.
     const codes: string[] = [];
-    let nextNumber = await generateEmployeeCode().then(code => {
-      const match = code.match(/EMP-(\d+)/);
-      return match ? parseInt(match[1], 10) : 1;
-    });
     for (let i = 0; i < employees.length; i++) {
-      codes.push(`EMP-${String(nextNumber).padStart(3, "0")}`);
-      nextNumber += 1;
+      codes.push(await generateEmployeeCode());
     }
 
     const createdEmployees = await prisma.$transaction(
@@ -149,7 +146,7 @@ export async function POST(request: NextRequest) {
 
     return created({
       count: createdEmployees.length,
-      data: createdEmployees.map(serializeEmployee),
+      data: createdEmployees.map((e) => serializeEmployee(e, { includePosPassword: true })),
     });
   } catch (error) {
     return serverError(error);

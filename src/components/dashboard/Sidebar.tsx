@@ -31,7 +31,7 @@ export default function Sidebar({
           {!collapsed && (
             <div>
               <h1 className="text-xl font-bold">
-                ORO Dashboard
+                OroDashboard
               </h1>
             </div>
           )}
@@ -39,6 +39,7 @@ export default function Sidebar({
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="rounded-lg p-2 hover:bg-[var(--hover)]"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? (
               <PanelLeftOpen size={18} />
@@ -61,8 +62,10 @@ export default function Sidebar({
                   "sidebar-item",
                   pathname === item.href && "active"
                 )}
+                aria-label={item.title}
+                aria-current={pathname === item.href ? "page" : undefined}
               >
-                <Icon size={20} />
+                <Icon size={20} aria-hidden="true" />
 
                 {!collapsed && (
                   <span>{item.title}</span>

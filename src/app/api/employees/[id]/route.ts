@@ -11,6 +11,7 @@ import {
   serverError,
 } from "@/lib/api-utils";
 import { updateEmployeeSchema } from "@/lib/schemas/employee";
+import { hasPermission } from "@/lib/permissions";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -43,8 +44,11 @@ export async function GET(request: NextRequest, context: Context) {
 
     if (!employee) return notFound("Employee");
 
+    const includePosPassword =
+      auth.session.role === "SUPER_ADMIN" || hasPermission(auth.session.permissions, "employees", "edit");
+
     return ok({
-      ...serializeEmployee(employee),
+      ...serializeEmployee(employee, { includePosPassword }),
       pettyCash: employee.pettyCash.map((p) => ({
         id: p.id,
         amount: Number(p.amount),
@@ -120,7 +124,7 @@ export async function PATCH(request: NextRequest, context: Context) {
       include: employeeInclude,
     });
 
-    return ok(serializeEmployee(employee));
+    return ok(serializeEmployee(employee, { includePosPassword: true }));
   } catch (error) {
     return serverError(error);
   }

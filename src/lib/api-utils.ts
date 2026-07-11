@@ -52,37 +52,60 @@ export function toNumber(value: unknown): number {
 // Code generators
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function generateStationCode(): Promise<string> {
-  const latest = await prisma.station.findFirst({
-    where: { code: { startsWith: "STN-" } },
+// Atomic counter backed by system_config. Uses a single INSERT ... ON
+// CONFLICT DO UPDATE statement — Postgres's real atomic upsert primitive, not
+// Prisma's ORM-level upsert() (which does a separate check-then-write and can
+// throw a unique-constraint error if two requests race to seed the same key
+// for the first time). One statement handles both "first ever call" (seeds
+// from the current max existing code) and "increment" atomically, so
+// concurrent callers can never receive the same next value.
+async function nextSequence(
+  seqKey: string,
+  prefix: string,
+  padding: number,
+  seedFromCurrentMax: () => Promise<number>
+): Promise<string> {
+  const alreadySeeded = await prisma.systemConfig.findUnique({
+    where: { key: seqKey },
+    select: { key: true },
+  });
+  // Only computed when needed — a floor value, safe even if another request
+  // wins the INSERT race below (ON CONFLICT DO UPDATE ignores it then).
+  const seed = alreadySeeded ? 0 : await seedFromCurrentMax();
+
+  const result = await prisma.$queryRaw<{ value: string }[]>`
+    INSERT INTO system_config (key, value, "updatedAt")
+    VALUES (${seqKey}, ${String(seed + 1)}, now())
+    ON CONFLICT (key) DO UPDATE SET value = (system_config.value::int + 1)::text, "updatedAt" = now()
+    RETURNING value
+  `;
+  const next = parseInt(result[0].value, 10);
+  return `${prefix}-${String(next).padStart(padding, "0")}`;
+}
+
+async function currentMaxCode(
+  findFirst: (args: { where: { code: { startsWith: string } }; orderBy: { code: "desc" }; select: { code: true } }) => Promise<{ code: string } | null>,
+  prefix: string
+): Promise<number> {
+  const latest = await findFirst({
+    where: { code: { startsWith: `${prefix}-` } },
     orderBy: { code: "desc" },
     select: { code: true },
   });
-  const match = latest?.code.match(/STN-(\d+)/);
-  const next = (match ? parseInt(match[1], 10) : 0) + 1;
-  return `STN-${String(next).padStart(3, "0")}`;
+  const match = latest?.code.match(new RegExp(`${prefix}-(\\d+)`));
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+export async function generateStationCode(): Promise<string> {
+  return nextSequence("seq_station_code", "STN", 3, () => currentMaxCode(prisma.station.findFirst.bind(prisma.station), "STN"));
 }
 
 export async function generateEmployeeCode(): Promise<string> {
-  const latest = await prisma.employee.findFirst({
-    where: { code: { startsWith: "EMP-" } },
-    orderBy: { code: "desc" },
-    select: { code: true },
-  });
-  const match = latest?.code.match(/EMP-(\d+)/);
-  const next = (match ? parseInt(match[1], 10) : 0) + 1;
-  return `EMP-${String(next).padStart(3, "0")}`;
+  return nextSequence("seq_employee_code", "EMP", 3, () => currentMaxCode(prisma.employee.findFirst.bind(prisma.employee), "EMP"));
 }
 
 export async function generatePosCode(): Promise<string> {
-  const latest = await prisma.posMachine.findFirst({
-    where: { code: { startsWith: "POS-" } },
-    orderBy: { code: "desc" },
-    select: { code: true },
-  });
-  const match = latest?.code.match(/POS-(\d+)/);
-  const next = (match ? parseInt(match[1], 10) : 0) + 1;
-  return `POS-${String(next).padStart(3, "0")}`;
+  return nextSequence("seq_pos_code", "POS", 3, () => currentMaxCode(prisma.posMachine.findFirst.bind(prisma.posMachine), "POS"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,7 +175,10 @@ type EmployeeWithRelations = Employee & {
   posMachines?: { id: string; code: string; serial: string }[];
 };
 
-export function serializeEmployee(e: EmployeeWithRelations) {
+export function serializeEmployee(
+  e: EmployeeWithRelations,
+  options?: { includePosPassword?: boolean }
+) {
   return {
     id: e.id,
     code: e.code,
@@ -171,6 +197,9 @@ export function serializeEmployee(e: EmployeeWithRelations) {
     stationId: e.stationId,
     station: e.station ?? null,
     posMachines: e.posMachines ?? [],
+    // Plaintext by design (POS devices need it as-is) — only ever included in
+    // the response when the caller has Employees edit permission.
+    posPassword: options?.includePosPassword ? e.posPassword ?? null : undefined,
     isDeleted: e.isDeleted,
     deletedAt: e.deletedAt,
     createdAt: e.createdAt,
