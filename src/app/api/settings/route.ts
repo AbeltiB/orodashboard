@@ -1,7 +1,7 @@
 // src/app/api/settings/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, requireRole } from "@/lib/api-auth";
+import { requirePermission, requireRole } from "@/lib/api-auth";
 import { badRequest, ok, serverError } from "@/lib/api-utils";
 import { bulkUpsertSystemConfigSchema } from "@/lib/schemas/settings";
 
@@ -13,7 +13,7 @@ import { bulkUpsertSystemConfigSchema } from "@/lib/schemas/settings";
  *   key — filter to a single key (optional)
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "settings", "view");
   if ("error" in auth) return auth.error;
 
   try {

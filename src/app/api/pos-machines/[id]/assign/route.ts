@@ -1,7 +1,7 @@
 // src/app/api/pos-machines/[id]/assign/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { badRequest, notFound, ok, serializePosMachine, serverError } from "@/lib/api-utils";
 import { assignPosMachineSchema } from "@/lib/schemas/pos-machine";
 
@@ -20,7 +20,7 @@ const posInclude = {
  * - Updates the machine's current assignment fields
  */
 export async function POST(request: NextRequest, context: Context) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "pos-machines", "edit");
   if ("error" in auth) return auth.error;
 
   try {

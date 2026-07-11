@@ -1,7 +1,7 @@
 // src/app/api/fare-matrix/[id]/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { badRequest, notFound, ok, serverError } from "@/lib/api-utils";
 import { upsertFareMatrixRowSchema } from "@/lib/schemas/fare-matrix";
 
@@ -12,7 +12,7 @@ type Context = { params: Promise<{ id: string }> };
  * Update a single fare matrix row by its DB id.
  */
 export async function PATCH(request: NextRequest, context: Context) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "fare-matrix", "edit");
   if ("error" in auth) return auth.error;
 
   try {
@@ -26,7 +26,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     const existing = await prisma.fareMatrix.findUnique({ where: { id } });
     if (!existing) return notFound("Fare matrix row");
 
-    const updatedBy = request.headers.get("x-admin-id") ?? null;
+    const updatedBy = auth.session.adminUserId;
 
     const row = await prisma.fareMatrix.update({
       where: { id },

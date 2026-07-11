@@ -2,7 +2,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import {
   ok,
   parseIncludeDeleted,
@@ -28,7 +28,7 @@ import {
  *   offset, limit
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "terminals", "view");
   if ("error" in auth) return auth.error;
 
   try {

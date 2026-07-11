@@ -1,7 +1,7 @@
 // src/app/api/employees/[id]/petty-cash/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import {
   badRequest,
   created,
@@ -36,7 +36,7 @@ function serializePettyCash(p: {
 }
 
 export async function GET(request: NextRequest, context: Context) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "employees", "view");
   if ("error" in auth) return auth.error;
 
   try {
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest, context: Context) {
 }
 
 export async function POST(request: NextRequest, context: Context) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "employees", "edit");
   if ("error" in auth) return auth.error;
 
   try {

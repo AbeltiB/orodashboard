@@ -163,7 +163,7 @@ type Section = "users" | "system" | "notifications" | "security" | "about";
 
 const NAV: { id: Section; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "users",         label: "System Users",   icon: <Users size={16} />,    desc: "Manage admin accounts, roles & permissions" },
-  { id: "security",      label: "Security",        icon: <Shield size={16} />,   desc: "PIN policies, session & lockout settings"    },
+  { id: "security",      label: "Security",        icon: <Shield size={16} />,   desc: "OTP, session & lockout thresholds"           },
   { id: "system",        label: "System",          icon: <Settings size={16} />, desc: "App name, timezone, appearance"              },
   { id: "notifications", label: "Notifications",   icon: <Bell size={16} />,     desc: "Alert preferences and channels"              },
   { id: "about",         label: "About",           icon: <Info size={16} />,     desc: "Version, licence and build info"             },

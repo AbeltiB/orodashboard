@@ -1,7 +1,7 @@
 // src/app/api/reports/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { badRequest, ok, serverError } from "@/lib/api-utils";
 
 /**
@@ -28,7 +28,7 @@ import { badRequest, ok, serverError } from "@/lib/api-utils";
  *   region
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "reports", "view");
   if ("error" in auth) return auth.error;
 
   try {

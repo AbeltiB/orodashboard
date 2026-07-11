@@ -2,7 +2,7 @@
 import { NextRequest } from "next/server";
 import { ZodSafeParseSuccess } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import {
   badRequest,
   created,
@@ -31,7 +31,7 @@ function getDuplicates(values: string[]): string[] {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "employees", "edit");
   if ("error" in auth) return auth.error;
 
   try {

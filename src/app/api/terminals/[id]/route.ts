@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma, type Terminal } from "@/generated/prisma/client";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import {
   badRequest,
   notFound,
@@ -23,7 +23,7 @@ const terminalInclude = {
 } as const;
 
 export async function GET(request: NextRequest, context: TerminalContext) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "terminals", "view");
   if ("error" in auth) return auth.error;
 
   try {
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, context: TerminalContext) {
 }
 
 export async function PATCH(request: NextRequest, context: TerminalContext) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "terminals", "edit");
   if ("error" in auth) return auth.error;
 
   try {
@@ -94,7 +94,7 @@ export async function PATCH(request: NextRequest, context: TerminalContext) {
 }
 
 export async function DELETE(request: NextRequest, context: TerminalContext) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "terminals", "edit");
   if ("error" in auth) return auth.error;
 
   try {

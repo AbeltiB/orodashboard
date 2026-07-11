@@ -1,7 +1,7 @@
 // src/app/api/fare-matrix/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { badRequest, ok, serverError } from "@/lib/api-utils";
 import { bulkUpsertFareMatrixSchema } from "@/lib/schemas/fare-matrix";
 
@@ -34,7 +34,7 @@ function serializeFareRow(row: {
  *   calculatedFares[busType][busLevel] = { asphalt: rate, gravel: rate }
  */
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "fare-matrix", "view");
   if ("error" in auth) return auth.error;
 
   try {
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
  * Sends the entire matrix in one transaction (matches the UI pattern).
  */
 export async function PUT(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "fare-matrix", "edit");
   if ("error" in auth) return auth.error;
 
   try {
@@ -73,7 +73,7 @@ export async function PUT(request: NextRequest) {
     const parsed = bulkUpsertFareMatrixSchema.safeParse(body);
     if (!parsed.success) return badRequest("Invalid request body.", parsed.error.flatten());
 
-    const updatedBy = request.headers.get("x-admin-id") ?? null;
+    const updatedBy = auth.session.adminUserId;
 
     const rows = await prisma.$transaction(
       parsed.data.rows.map((row) =>

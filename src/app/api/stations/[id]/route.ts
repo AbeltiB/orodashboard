@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma, type Terminal } from "@/generated/prisma/client";
-import { requireAuth } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import {
   badRequest,
   notFound,
@@ -34,7 +34,7 @@ const stationInclude = {
 } as const;
 
 export async function GET(request: NextRequest, context: StationContext) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "stations", "view");
   if ("error" in auth) return auth.error;
 
   try {
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest, context: StationContext) {
 }
 
 export async function PATCH(request: NextRequest, context: StationContext) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "stations", "edit");
   if ("error" in auth) return auth.error;
 
   try {
@@ -125,7 +125,7 @@ export async function PATCH(request: NextRequest, context: StationContext) {
 }
 
 export async function DELETE(request: NextRequest, context: StationContext) {
-  const auth = await requireAuth(request);
+  const auth = await requirePermission(request, "stations", "edit");
   if ("error" in auth) return auth.error;
 
   try {
