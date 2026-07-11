@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
  *
  * Known keys used by the system:
  *   pos_latest_app_version  — e.g. "ORO Ticket v2.4.1"
- *   company_name            — e.g. "Adrash Intercity Transport"
+ *   company_name            — e.g. "BS Tech Digital"
  *   support_phone           — e.g. "+251911000000"
  *   ticket_receipt_footer   — footer text on printed tickets
  */

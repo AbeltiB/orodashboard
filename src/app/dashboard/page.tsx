@@ -284,7 +284,7 @@ export default function DashboardPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
           <div>
             <p style={{ fontSize: 12, fontWeight: 600, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 4px" }}>
-              Adrash Admin
+              OroDashboard
             </p>
             <h1 style={{ fontSize: 26, fontWeight: 800, color: "var(--foreground)", margin: 0 }}>Operations Dashboard</h1>
             <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "5px 0 0", display: "flex", alignItems: "center", gap: 6 }}>

@@ -99,7 +99,7 @@ function exportHTML(filename: string, title: string, headers: string[], rows: (s
     </style>
   </head><body>
     <h1>${title}</h1>
-    <p class="meta">Adrash Admin · Generated ${new Date().toLocaleString("en-GB")} · Exported as PDF-ready HTML</p>
+    <p class="meta">OroDashboard · Generated ${new Date().toLocaleString("en-GB")} · Exported as PDF-ready HTML</p>
     <table>
       <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
       <tbody>${rowsHtml}</tbody>

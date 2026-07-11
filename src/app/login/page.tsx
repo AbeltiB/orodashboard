@@ -371,7 +371,7 @@ export default function LoginPage() {
 
           {/* ── Logo ── */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginBottom: 36 }}>
-            {/* Replace with <Image src="/adrash-logo.png" ... /> when available */}
+            {/* Replace with <Image src="/orodashboard-logo.png" ... /> when available */}
             <svg width="80" height="80" viewBox="0 0 88 88" fill="none" aria-hidden="true">
               <polygon points="44,6 82,78 6,78" fill="#1d4ed8" />
               <line x1="44" y1="14" x2="44" y2="72" stroke="white" strokeWidth="3.5" strokeLinecap="round"/>
@@ -380,7 +380,7 @@ export default function LoginPage() {
               <circle cx="44" cy="7" r="5" fill="white"/>
             </svg>
             <div style={{ textAlign: "center", lineHeight: 1 }}>
-              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.18em", color: "#0f172a" }}>ADRĀSH</div>
+              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.18em", color: "#0f172a" }}>ORODASHBOARD</div>
               <div style={{ fontSize: 11, letterSpacing: "0.06em", color: "#64748b", marginTop: 4 }}>Smart Mobility, Simple Life.</div>
             </div>
           </div>
@@ -531,8 +531,8 @@ export default function LoginPage() {
 
           {/* ── Footer ── */}
           <p style={{ marginTop: 28, textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
-            አድራሽ Admin · powered by{" "}
-            <span style={{ fontWeight: 600, color: "#64748b" }}>BS Technologies</span>
+            OroDashboard Admin · powered by{" "}
+            <span style={{ fontWeight: 600, color: "#64748b" }}>BS Tech Digital</span>
           </p>
         </div>
       </main>

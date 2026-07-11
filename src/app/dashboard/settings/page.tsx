@@ -579,8 +579,8 @@ function SecuritySection() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 function SystemSection() {
-  const [appName,   setAppName]   = useState("Adrash Admin");
-  const [company,   setCompany]   = useState("BS Technologies PLC");
+  const [appName,   setAppName]   = useState("OroDashboard");
+  const [company,   setCompany]   = useState("BS Tech Digital");
   const [timezone,  setTimezone]  = useState("Africa/Addis_Ababa");
   const [currency,  setCurrency]  = useState("ETB");
   const [dateFormat,setDateFormat]= useState("DD/MM/YYYY");
@@ -700,13 +700,13 @@ function NotificationsSection() {
 
 function AboutSection() {
   const rows = [
-    { label: "Application",     value: "Adrash Admin Dashboard" },
+    { label: "Application",     value: "OroDashboard" },
     { label: "Version",         value: "v1.0.0-beta" },
     { label: "Build",           value: "2025-06-27" },
-    { label: "Framework",       value: "Next.js 16 · TypeScript · Prisma 6" },
+    { label: "Framework",       value: "Next.js 16 · TypeScript · Prisma 7" },
     { label: "Database",        value: "PostgreSQL (Supabase)" },
-    { label: "Developed by",    value: "BS Technologies PLC" },
-    { label: "Contact",         value: "dev@bstechnologies.et" },
+    { label: "Developed by",    value: "BS Tech Digital" },
+    { label: "Contact",         value: "dev@bstechdigital.com" },
     { label: "Licence",         value: "Proprietary — all rights reserved" },
   ];
   return (
@@ -862,7 +862,7 @@ export default function SettingsPage() {
         <div style={{ width: 240, borderRight: "1px solid var(--border)", background: "var(--surface)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
           <div style={{ padding: "24px 20px 16px" }}>
             <h1 style={{ fontSize: 18, fontWeight: 800, color: "var(--foreground)", margin: 0 }}>Settings</h1>
-            <p style={{ fontSize: 11, color: "var(--muted-foreground)", margin: "3px 0 0", fontWeight: 600 }}>Super admin · BS Technologies</p>
+            <p style={{ fontSize: 11, color: "var(--muted-foreground)", margin: "3px 0 0", fontWeight: 600 }}>Super admin · BS Tech Digital</p>
           </div>
           <nav style={{ flex: 1, padding: "0 10px 20px" }}>
             {NAV.map(n => {

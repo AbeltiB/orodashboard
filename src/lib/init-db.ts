@@ -24,9 +24,9 @@ async function seedDefaultConfig(): Promise<void> {
 
   const defaults = [
     { key: "pos_latest_app_version", value: "ORO Ticket v2.4.1", description: "Current POS app version — used to flag outdated machines" },
-    { key: "company_name",           value: "Adrash Intercity Transport", description: "Company display name" },
+    { key: "company_name",           value: "BS Tech Digital", description: "Company display name" },
     { key: "support_phone",          value: "+251911000000", description: "Support contact number" },
-    { key: "ticket_receipt_footer",  value: "Thank you for travelling with Adrash!", description: "Footer text printed on tickets" },
+    { key: "ticket_receipt_footer",  value: "Thank you for travelling with BS Tech Digital!", description: "Footer text printed on tickets" },
   ];
 
   await Promise.all(
