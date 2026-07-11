@@ -12,6 +12,7 @@ export async function initializeDatabase(): Promise<void> {
   initialized = true;
   await connectDatabase();
   await seedDefaultConfig();
+  await seedSuperAdmin();
 }
 
 /**
@@ -42,4 +43,42 @@ async function seedDefaultConfig(): Promise<void> {
         })
     )
   );
+}
+
+/**
+ * Seeds the initial super admin from env vars if no admin with that phone
+ * number exists yet. Idempotent — never overwrites an existing row, so this
+ * is safe to leave running on every boot; only the very first boot matters.
+ */
+async function seedSuperAdmin(): Promise<void> {
+  const phone = process.env.SUPER_ADMIN_PHONE;
+  const firstName = process.env.SUPER_ADMIN_FIRST_NAME;
+  const lastName = process.env.SUPER_ADMIN_LAST_NAME;
+  if (!phone || !firstName || !lastName) {
+    console.warn(
+      "⚠ SUPER_ADMIN_PHONE / SUPER_ADMIN_FIRST_NAME / SUPER_ADMIN_LAST_NAME not set — skipping super admin seed."
+    );
+    return;
+  }
+
+  const { prisma } = await import("./prisma");
+  const { fullPermissions } = await import("./permissions");
+
+  await prisma.adminUser
+    .upsert({
+      where: { phone },
+      create: {
+        phone,
+        firstName,
+        middleName: process.env.SUPER_ADMIN_MIDDLE_NAME || null,
+        lastName,
+        role: "SUPER_ADMIN",
+        isActive: true,
+        permissions: fullPermissions(),
+      },
+      update: {}, // never overwrite — the super admin manages themselves from here
+    })
+    .catch((error) => {
+      console.error("Failed to seed super admin:", error);
+    });
 }

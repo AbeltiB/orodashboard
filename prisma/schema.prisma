@@ -72,6 +72,12 @@ enum BusLevel {
   LEVEL_3
 }
 
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  VIEWER
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // STATION
 // ─────────────────────────────────────────────────────────────────────────────
@@ -315,13 +321,60 @@ model SystemConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model AdminUser {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String   @unique
-  pin       String   // bcrypt-hashed PIN
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String    @id @default(cuid())
 
+  firstName     String
+  middleName    String?
+  lastName      String
+
+  phone         String    @unique // +251XXXXXXXXX — login identifier
+  companyEmail  String?
+  personalEmail String?
+
+  role          AdminRole @default(ADMIN)
+  isActive      Boolean   @default(true)
+
+  // Per-page permissions — [{ page, canView, canEdit }], validated at the API boundary
+  permissions   Json      @default("[]")
+
+  // OTP (hashed via bcrypt — see src/lib/pin.ts — never store the raw code)
+  otpCodeHash    String?
+  otpExpiresAt   DateTime?
+  otpAttempts    Int       @default(0)
+  otpRequestedAt DateTime? // for resend rate-limiting
+
+  // Lockout after repeated failed OTP attempts
+  lockedUntil    DateTime?
+
+  lastLoginAt    DateTime?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  sessions       Session[]
+
+  @@index([role])
+  @@index([isActive])
   @@map("admin_users")
+}
+
+model Session {
+  id          String    @id @default(cuid())
+
+  adminUserId String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  tokenHash   String    @unique // sha256(rawToken) — raw token only ever lives in the cookie
+  expiresAt   DateTime            // createdAt + 7 days, fixed — never slides
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+
+  userAgent   String?
+  ipAddress   String?
+
+  revokedAt   DateTime? // set on logout / admin deactivation; NULL = still valid
+
+  @@index([adminUserId])
+  @@index([expiresAt])
+  @@map("sessions")
 }
