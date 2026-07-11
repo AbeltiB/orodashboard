@@ -34,8 +34,8 @@ const stationInclude = {
 } as const;
 
 export async function GET(request: NextRequest, context: StationContext) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;
@@ -53,8 +53,8 @@ export async function GET(request: NextRequest, context: StationContext) {
 }
 
 export async function PATCH(request: NextRequest, context: StationContext) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;
@@ -125,8 +125,8 @@ export async function PATCH(request: NextRequest, context: StationContext) {
 }
 
 export async function DELETE(request: NextRequest, context: StationContext) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;

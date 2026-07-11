@@ -12,8 +12,8 @@ type Context = { params: Promise<{ id: string }> };
  * Update a single fare matrix row by its DB id.
  */
 export async function PATCH(request: NextRequest, context: Context) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;

@@ -1,28 +1,22 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { KeyRound, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { KeyRound, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-// What the API returns from POST /api/auth/check-phone
-type PhoneCheckResult =
-  | { status: "not_found" }
-  | { status: "locked"; lockedUntil: string }
-  | { status: "pin_not_set"; name: string | null }
-  | { status: "pin_set"; name: string | null };
-
-type Step =
-  | "phone"          // Step 1 — enter phone
-  | "set_pin"        // Step 2a — first login, create PIN
-  | "confirm_pin"    // Step 2b — confirm the new PIN
-  | "enter_pin"      // Step 2c — returning user, enter existing PIN
-  | "otp_sent"       // OTP flow — code sent, waiting for input
-  | "reset_pin"      // OTP verified, now set a new PIN
-  | "confirm_reset"; // Confirm the reset PIN
+type Step = "phone" | "otp_sent";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+class ApiError extends Error {
+  lockedUntil?: string;
+  constructor(message: string, lockedUntil?: string) {
+    super(message);
+    this.lockedUntil = lockedUntil;
+  }
+}
 
 async function apiFetch<T>(path: string, body: object): Promise<T> {
   const res = await fetch(path, {
@@ -31,7 +25,9 @@ async function apiFetch<T>(path: string, body: object): Promise<T> {
     body: JSON.stringify(body),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.message ?? json?.error ?? `Error ${res.status}`);
+  if (!res.ok) {
+    throw new ApiError(json?.message ?? json?.error ?? `Error ${res.status}`, json?.lockedUntil);
+  }
   return json as T;
 }
 
@@ -81,13 +77,11 @@ function wrapStyle(focused: boolean): React.CSSProperties {
   };
 }
 
-function primaryBtn(active: boolean, danger = false): React.CSSProperties {
-  const bg = danger
-    ? active ? "#dc2626" : "color-mix(in srgb, #dc2626 52%, #94a3b8)"
-    : active ? "var(--primary)" : "color-mix(in srgb, var(--primary) 52%, #94a3b8)";
+function primaryBtn(active: boolean): React.CSSProperties {
   return {
     width: "100%", height: "48px", borderRadius: "12px",
-    background: bg, color: "#ffffff",
+    background: active ? "var(--primary)" : "color-mix(in srgb, var(--primary) 52%, #94a3b8)",
+    color: "#ffffff",
     fontSize: "15px", fontWeight: 600, letterSpacing: "0.01em",
     display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
     cursor: active ? "pointer" : "default",
@@ -128,64 +122,6 @@ function SuccessBanner({ message }: { message: string }) {
   );
 }
 
-// PIN dots — visual indicator (6 filled/empty circles)
-function PinDots({ filled }: { filled: number }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "center", gap: 10, margin: "8px 0 20px" }}>
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} style={{
-          width: 13, height: 13, borderRadius: "50%",
-          background: i < filled ? "var(--primary)" : "var(--border)",
-          transition: "background 0.15s ease",
-          transform: i < filled ? "scale(1.15)" : "scale(1)",
-        }} />
-      ))}
-    </div>
-  );
-}
-
-// Masked PIN input (shows dots, numeric only)
-function PinInput({ value, onChange, onSubmit, autoFocus = false }: {
-  value: string;
-  onChange: (v: string) => void;
-  onSubmit: () => void;
-  autoFocus?: boolean;
-}) {
-  const [focused, setFocused] = useState(false);
-  const [show, setShow] = useState(false);
-  const ref = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { if (autoFocus) ref.current?.focus(); }, [autoFocus]);
-
-  return (
-    <>
-      <PinDots filled={value.length} />
-      <div style={wrapStyle(focused)}>
-        <input
-          ref={ref}
-          type={show ? "text" : "password"}
-          inputMode="numeric"
-          maxLength={6}
-          value={value}
-          onChange={e => onChange(e.target.value.replace(/\D/g, ""))}
-          onKeyDown={e => e.key === "Enter" && value.length === 6 && onSubmit()}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          style={{ ...baseInputStyle, letterSpacing: value.length ? "0.35em" : "0", fontFamily: "monospace" }}
-          placeholder="••••••"
-        />
-        <button
-          type="button"
-          onClick={() => { setShow(v => !v); ref.current?.focus(); }}
-          style={{ background: "none", border: "none", cursor: "pointer", padding: "0 14px", color: "var(--muted-foreground)", display: "flex", alignItems: "center" }}
-        >
-          {show ? <EyeOff size={15} /> : <Eye size={15} />}
-        </button>
-      </div>
-    </>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN LOGIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,116 +130,35 @@ export default function LoginPage() {
   const router = useRouter();
 
   // ── State ──────────────────────────────────────────────────────────────────
-  const [step,        setStep]        = useState<Step>("phone");
-  const [phone,       setPhone]       = useState("");
-  const [phoneFocused,setPhoneFocused]= useState(false);
-  const [userName,    setUserName]    = useState<string | null>(null);
+  const [step, setStep] = useState<Step>("phone");
+  const [phone, setPhone] = useState("");
+  const [phoneFocused, setPhoneFocused] = useState(false);
 
-  const [pin,         setPin]         = useState("");
-  const [pinConfirm,  setPinConfirm]  = useState("");
-  const [otpCode,     setOtpCode]     = useState("");
-  const [otpFocused,  setOtpFocused]  = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpFocused, setOtpFocused] = useState(false);
 
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState<string | null>(null);
-  const [success,  setSuccess]  = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const otpInputRef = useRef<HTMLInputElement>(null);
 
   const phoneValid = phone.length === 9 && /^[79]/.test(phone);
 
-  // ── Step 1 — check phone ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (step === "otp_sent") otpInputRef.current?.focus();
+  }, [step]);
 
-  async function handleCheckPhone() {
-    if (!phoneValid || loading) return;
-    setLoading(true); setError(null);
-    try {
-      const res = await apiFetch<PhoneCheckResult>("/api/auth/check-phone", {
-        phone: `+251${phone}`,
-      });
-
-      if (res.status === "not_found") {
-        setError("This phone number is not registered. Contact your administrator.");
-        return;
-      }
-      if (res.status === "locked") {
-        const until = new Date(res.lockedUntil).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-        setError(`Account locked due to too many failed attempts. Try again after ${until}.`);
-        return;
-      }
-
-      setUserName(res.name);
-
-      if (res.status === "pin_not_set") {
-        setStep("set_pin");
-      } else {
-        setStep("enter_pin");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong. Try again.");
-    } finally {
-      setLoading(false);
-    }
+  function lockedMessage(e: ApiError) {
+    if (!e.lockedUntil) return e.message;
+    const until = new Date(e.lockedUntil).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    return `${e.message} Try again after ${until}.`;
   }
 
-  // ── Step 2a/b — set new PIN (first login or reset) ────────────────────────
-
-  async function handleSetPin() {
-    if (pin.length !== 6 || loading) return;
-    setError(null);
-    setStep(step === "reset_pin" ? "confirm_reset" : "confirm_pin");
-    setPinConfirm("");
-  }
-
-  async function handleConfirmPin() {
-    if (pinConfirm.length !== 6 || loading) return;
-    if (pin !== pinConfirm) {
-      setError("PINs don't match. Please try again.");
-      setPinConfirm("");
-      return;
-    }
-    setLoading(true); setError(null);
-
-    const endpoint = step === "confirm_reset"
-      ? "/api/auth/reset-pin"
-      : "/api/auth/set-pin";
-
-    try {
-      await apiFetch(endpoint, { phone: `+251${phone}`, pin });
-      // set-pin also logs the user in and sets the cookie
-      if (step === "confirm_pin") {
-        router.push("/dashboard");
-      } else {
-        setSuccess("PIN reset successfully. Signing you in…");
-        await apiFetch("/api/auth/login", { phone: `+251${phone}`, pin });
-        router.push("/dashboard");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save PIN. Try again.");
-      setStep(step === "confirm_reset" ? "reset_pin" : "set_pin");
-      setPin("");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ── Step 2c — enter existing PIN ──────────────────────────────────────────
-
-  async function handleLogin() {
-    if (pin.length !== 6 || loading) return;
-    setLoading(true); setError(null);
-    try {
-      await apiFetch("/api/auth/login", { phone: `+251${phone}`, pin });
-      router.push("/dashboard");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Incorrect PIN. Please try again.");
-      setPin("");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ── OTP flow ───────────────────────────────────────────────────────────────
+  // ── Step 1 — request an OTP ────────────────────────────────────────────────
 
   async function handleSendOtp() {
+    if (!phoneValid || loading) return;
     setLoading(true); setError(null); setSuccess(null);
     try {
       await apiFetch("/api/auth/otp/send", { phone: `+251${phone}` });
@@ -311,47 +166,52 @@ export default function LoginPage() {
       setStep("otp_sent");
       setOtpCode("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to send OTP. Try again.");
+      setError(e instanceof ApiError ? lockedMessage(e) : "Failed to send OTP. Try again.");
     } finally {
       setLoading(false);
     }
   }
+
+  async function handleResendOtp() {
+    setLoading(true); setError(null); setSuccess(null);
+    try {
+      await apiFetch("/api/auth/otp/send", { phone: `+251${phone}` });
+      setSuccess(`A new code was sent to ${maskPhone(phone)}.`);
+      setOtpCode("");
+    } catch (e) {
+      setError(e instanceof ApiError ? lockedMessage(e) : "Failed to resend OTP. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Step 2 — verify the OTP and sign in ────────────────────────────────────
 
   async function handleVerifyOtp() {
     if (otpCode.length !== 6 || loading) return;
     setLoading(true); setError(null);
     try {
       await apiFetch("/api/auth/otp/verify", { phone: `+251${phone}`, otp: otpCode });
-      setStep("reset_pin");
-      setPin("");
+      router.push("/dashboard");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Invalid or expired code.");
+      setError(e instanceof ApiError ? lockedMessage(e) : "Invalid or expired code.");
       setOtpCode("");
     } finally {
       setLoading(false);
     }
   }
 
-  // ── Reset to phone step ────────────────────────────────────────────────────
-
   function goBack() {
     setStep("phone");
-    setPin(""); setPinConfirm(""); setOtpCode("");
+    setOtpCode("");
     setError(null); setSuccess(null);
   }
 
   // ── Shared header ──────────────────────────────────────────────────────────
 
-  const greeting = userName ? `Welcome${step === "enter_pin" ? " back" : ""}, ${userName.split(" ")[0]}` : null;
-
   const STEP_META: Record<Step, { title: string; sub: string }> = {
-    phone:         { title: "Admin sign in",       sub: "Enter your phone — we'll ask for your PIN next." },
-    set_pin:       { title: "Create your PIN",     sub: `${greeting ?? "First time here"}! Choose a 6-digit PIN to secure your account.` },
-    confirm_pin:   { title: "Confirm your PIN",    sub: "Enter the same PIN again to confirm." },
-    enter_pin:     { title: "Admin sign in",       sub: greeting ? `${greeting}. Enter your 6-digit PIN.` : "Enter your 6-digit PIN." },
-    otp_sent:      { title: "Check your phone",    sub: `Enter the 6-digit code sent to ${maskPhone(phone)}.` },
-    reset_pin:     { title: "Set a new PIN",       sub: "OTP verified. Choose your new 6-digit PIN." },
-    confirm_reset: { title: "Confirm new PIN",     sub: "Enter the same PIN again to confirm." },
+    phone: { title: "Admin sign in", sub: "Enter your registered phone number — we'll text you a code." },
+    otp_sent: { title: "Check your phone", sub: `Enter the 6-digit code sent to ${maskPhone(phone)}.` },
   };
 
   const meta = STEP_META[step];
@@ -399,7 +259,7 @@ export default function LoginPage() {
             </div>
 
             {/* Error / success banners */}
-            {error   && <ErrorBanner   message={error}   />}
+            {error && <ErrorBanner message={error} />}
             {success && <SuccessBanner message={success} />}
 
             {/* ── STEP: phone ── */}
@@ -416,7 +276,7 @@ export default function LoginPage() {
                       placeholder="9XXXXXXXX or 7XXXXXXXX"
                       value={phone}
                       onChange={e => { setPhone(e.target.value.replace(/\D/g, "")); setError(null); }}
-                      onKeyDown={e => e.key === "Enter" && handleCheckPhone()}
+                      onKeyDown={e => e.key === "Enter" && handleSendOtp()}
                       onFocus={() => setPhoneFocused(true)}
                       onBlur={() => setPhoneFocused(false)}
                       autoFocus
@@ -426,51 +286,16 @@ export default function LoginPage() {
                   <p style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>9 digits, no leading zero</p>
                 </div>
 
-                <button onClick={handleCheckPhone} disabled={!phoneValid || loading} style={primaryBtn(phoneValid && !loading)}>
+                <button onClick={handleSendOtp} disabled={!phoneValid || loading} style={primaryBtn(phoneValid && !loading)}>
                   {loading ? <Spinner /> : <KeyRound size={17} strokeWidth={2.2} />}
-                  {loading ? "Checking…" : "Continue with PIN"}
-                </button>
-
-                <button style={ghostBtn()} onClick={handleSendOtp} disabled={!phoneValid || loading}>
-                  Use OTP instead
+                  {loading ? "Sending…" : "Send code"}
                 </button>
               </>
             )}
 
-            {/* ── STEP: set_pin / reset_pin ── */}
-            {(step === "set_pin" || step === "reset_pin") && (
+            {/* ── STEP: otp_sent ── */}
+            {step === "otp_sent" && (
               <>
-                <label style={labelStyle}>Choose a 6-digit PIN</label>
-                <PinInput value={pin} onChange={v => { setPin(v); setError(null); }} onSubmit={handleSetPin} autoFocus />
-
-                <button onClick={handleSetPin} disabled={pin.length !== 6 || loading} style={primaryBtn(pin.length === 6 && !loading)}>
-                  {loading ? <Spinner /> : null}
-                  {loading ? "Saving…" : "Continue"}
-                </button>
-                <button style={ghostBtn()} onClick={goBack}>← Back to phone</button>
-              </>
-            )}
-
-            {/* ── STEP: confirm_pin / confirm_reset ── */}
-            {(step === "confirm_pin" || step === "confirm_reset") && (
-              <>
-                <label style={labelStyle}>Confirm your PIN</label>
-                <PinInput value={pinConfirm} onChange={v => { setPinConfirm(v); setError(null); }} onSubmit={handleConfirmPin} autoFocus />
-
-                <button onClick={handleConfirmPin} disabled={pinConfirm.length !== 6 || loading} style={primaryBtn(pinConfirm.length === 6 && !loading)}>
-                  {loading ? <Spinner /> : null}
-                  {loading ? "Saving PIN…" : step === "confirm_pin" ? "Create PIN & sign in" : "Confirm & sign in"}
-                </button>
-                <button style={ghostBtn()} onClick={() => { setStep(step === "confirm_reset" ? "reset_pin" : "set_pin"); setPinConfirm(""); setError(null); }}>
-                  ← Re-enter PIN
-                </button>
-              </>
-            )}
-
-            {/* ── STEP: enter_pin ── */}
-            {step === "enter_pin" && (
-              <>
-                {/* "Signing in as" row */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, padding: "10px 12px", background: "#f8fafc", borderRadius: 9, border: "1px solid #e2e8f0" }}>
                   <span style={{ fontSize: 13, color: "#64748b" }}>
                     Signing in as <strong style={{ color: "#0f172a" }}>+251{phone}</strong>
@@ -480,30 +305,14 @@ export default function LoginPage() {
                   </button>
                 </div>
 
-                <label style={labelStyle}>6-digit PIN</label>
-                <PinInput value={pin} onChange={v => { setPin(v); setError(null); }} onSubmit={handleLogin} autoFocus />
-
-                <button onClick={handleLogin} disabled={pin.length !== 6 || loading} style={primaryBtn(pin.length === 6 && !loading)}>
-                  {loading ? <Spinner /> : <KeyRound size={17} strokeWidth={2.2} />}
-                  {loading ? "Signing in…" : "Sign in"}
-                </button>
-
-                <button style={ghostBtn()} onClick={handleSendOtp} disabled={loading}>
-                  Forgot PIN? Sign in with OTP
-                </button>
-              </>
-            )}
-
-            {/* ── STEP: otp_sent ── */}
-            {step === "otp_sent" && (
-              <>
-                <label style={labelStyle}>6-digit OTP code</label>
+                <label style={labelStyle}>6-digit code</label>
                 <div style={wrapStyle(otpFocused)}>
                   <input
-                    type="text" inputMode="numeric" maxLength={6} autoFocus
+                    ref={otpInputRef}
+                    type="text" inputMode="numeric" maxLength={6}
                     value={otpCode}
                     onChange={e => { setOtpCode(e.target.value.replace(/\D/g, "")); setError(null); }}
-                    onKeyDown={e => e.key === "Enter" && handleVerifyOtp()}
+                    onKeyDown={e => e.key === "Enter" && otpCode.length === 6 && handleVerifyOtp()}
                     onFocus={() => setOtpFocused(true)}
                     onBlur={() => setOtpFocused(false)}
                     style={{ ...baseInputStyle, letterSpacing: "0.35em", fontFamily: "monospace" }}
@@ -516,10 +325,10 @@ export default function LoginPage() {
 
                 <button onClick={handleVerifyOtp} disabled={otpCode.length !== 6 || loading} style={primaryBtn(otpCode.length === 6 && !loading)}>
                   {loading ? <Spinner /> : null}
-                  {loading ? "Verifying…" : "Verify OTP"}
+                  {loading ? "Verifying…" : "Verify & sign in"}
                 </button>
 
-                <button style={ghostBtn()} onClick={handleSendOtp} disabled={loading}>
+                <button style={ghostBtn()} onClick={handleResendOtp} disabled={loading}>
                   Resend code
                 </button>
                 <button style={{ ...ghostBtn(), color: "#64748b", marginTop: 6 }} onClick={goBack}>

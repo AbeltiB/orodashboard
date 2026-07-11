@@ -1,26 +1,57 @@
+// src/lib/api-auth.ts
 import type { NextRequest } from "next/server";
+import type { $Enums } from "@/generated/prisma/client";
+import { getSessionByToken, SESSION_COOKIE, type AuthSession } from "./session";
+import { forbidden, unauthorized } from "./api-utils";
+import { hasPermission, type PermissionPage } from "./permissions";
+
+export type AuthResult = { error: Response } | { session: AuthSession };
 
 /**
- * Auth guard — temporarily disabled during development.
- *
- * The real implementation will validate a signed session token and enforce
- * ABAC rules once the auth system is built. For now every request is allowed
- * through so API routes can be tested without a login cookie.
- *
- * To re-enable: uncomment the token check below and delete the early return.
+ * Verifies the session cookie against the database (never trusts src/proxy.ts's
+ * optimistic cookie-presence check alone — see src/proxy.ts for why). Every API
+ * route handler must call this itself.
  */
-export function requireAuth(request: NextRequest): Response | null {
-  // ── DISABLED — restore before production ──────────────────────────────────
-  void request; // suppress unused-variable warning
-  return null;
+export async function requireAuth(request: NextRequest): Promise<AuthResult> {
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  if (!token) {
+    return { error: unauthorized("Missing authentication token.") };
+  }
 
-  // ── RESTORE THIS WHEN AUTH IS READY ──────────────────────────────────────
-  // const token = request.cookies.get("token")?.value;
-  // if (!token) {
-  //   return Response.json(
-  //     { error: "Unauthorized", message: "Missing authentication token." },
-  //     { status: 401 }
-  //   );
-  // }
-  // return null;
+  const session = await getSessionByToken(token);
+  if (!session) {
+    return { error: unauthorized("Invalid or expired session.") };
+  }
+
+  return { session };
+}
+
+export async function requireRole(
+  request: NextRequest,
+  roles: $Enums.AdminRole[]
+): Promise<AuthResult> {
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth;
+
+  if (!roles.includes(auth.session.role)) {
+    return { error: forbidden("You do not have permission to perform this action.") };
+  }
+
+  return auth;
+}
+
+export async function requirePermission(
+  request: NextRequest,
+  page: PermissionPage,
+  action: "view" | "edit"
+): Promise<AuthResult> {
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth;
+
+  // Super admins implicitly have full access regardless of their permissions blob.
+  if (auth.session.role !== "SUPER_ADMIN" && !hasPermission(auth.session.permissions, page, action)) {
+    return { error: forbidden(`You do not have ${action} access to ${page}.`) };
+  }
+
+  return auth;
 }

@@ -34,8 +34,8 @@ function serializeFareRow(row: {
  *   calculatedFares[busType][busLevel] = { asphalt: rate, gravel: rate }
  */
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const rows = await prisma.fareMatrix.findMany({
@@ -65,8 +65,8 @@ export async function GET(request: NextRequest) {
  * Sends the entire matrix in one transaction (matches the UI pattern).
  */
 export async function PUT(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await request.json();

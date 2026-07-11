@@ -34,8 +34,8 @@ const stationInclude = {
 } as const;
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { searchParams } = new URL(request.url);
@@ -93,8 +93,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await request.json();

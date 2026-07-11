@@ -230,6 +230,10 @@ export function unauthorized(message = "Unauthorized") {
   return Response.json({ error: "Unauthorized", message }, { status: 401 });
 }
 
+export function forbidden(message = "Forbidden") {
+  return Response.json({ error: "Forbidden", message }, { status: 403 });
+}
+
 export function notFound(resource = "Resource") {
   return Response.json(
     { error: "Not Found", message: `${resource} not found.` },
@@ -242,8 +246,11 @@ export function conflict(message: string) {
 }
 
 export function serverError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Internal server error";
   console.error("API error:", error);
+  const message =
+    process.env.NODE_ENV !== "production" && error instanceof Error
+      ? error.message
+      : "Internal server error";
   return Response.json({ error: "Internal Server Error", message }, { status: 500 });
 }
 

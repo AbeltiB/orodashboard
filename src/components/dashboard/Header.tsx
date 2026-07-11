@@ -11,17 +11,24 @@ import {
   LogOut,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import type { AuthSession } from "@/lib/session";
+import { ADMIN_ROLE_LABELS } from "@/lib/permissions";
 
 interface HeaderProps {
   collapsed: boolean;
   setCollapsed: (value: boolean) => void;
   setMobileOpen: (value: boolean) => void;
+  user: AuthSession;
 }
 
 export default function Header({
   setMobileOpen,
+  user,
 }: HeaderProps) {
   const router = useRouter();
+
+  const fullName = [user.firstName, user.middleName, user.lastName].filter(Boolean).join(" ");
+  const initials = `${user.firstName[0] ?? ""}${user.lastName[0] ?? ""}`.toUpperCase();
 
   const [profileOpen, setProfileOpen] =
     useState(false);
@@ -87,8 +94,13 @@ export default function Header({
     setDarkMode(!darkMode);
   }
 
-  function handleLogout() {
-    router.push("/login");
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
   }
 
   return (
@@ -146,16 +158,16 @@ export default function Header({
             className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-[var(--hover)]"
           >
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--primary)] font-medium text-white">
-              AB
+              {initials}
             </div>
 
             <div className="hidden text-left md:block">
               <p className="font-medium">
-                Abelti Beshana
+                {fullName}
               </p>
 
               <p className="text-sm text-[var(--muted-foreground)]">
-                Administrator
+                {ADMIN_ROLE_LABELS[user.role]}
               </p>
             </div>
           </button>
@@ -165,15 +177,15 @@ export default function Header({
             <div className="absolute right-0 top-16 z-50 w-72 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-xl">
               <div className="border-b p-4">
                 <h3 className="font-semibold">
-                  Abelti Beshana
+                  {fullName}
                 </h3>
 
                 <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                  +251980232577
+                  {user.phone}
                 </p>
 
                 <p className="text-sm text-[var(--muted-foreground)]">
-                  abelti@example.com
+                  {ADMIN_ROLE_LABELS[user.role]}
                 </p>
               </div>
 

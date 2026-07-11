@@ -7,8 +7,8 @@ import { createAdminUserSchema } from "@/lib/schemas/settings";
 import { hashPin } from "@/lib/pin";
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const users = await prisma.adminUser.findMany({
@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await request.json();

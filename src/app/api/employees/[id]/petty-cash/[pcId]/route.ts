@@ -8,8 +8,8 @@ import { updatePettyCashSchema } from "@/lib/schemas/employee";
 type Context = { params: Promise<{ id: string; pcId: string }> };
 
 export async function PATCH(request: NextRequest, context: Context) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id, pcId } = await context.params;
@@ -47,8 +47,8 @@ export async function PATCH(request: NextRequest, context: Context) {
 }
 
 export async function DELETE(request: NextRequest, context: Context) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id, pcId } = await context.params;

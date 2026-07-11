@@ -23,8 +23,8 @@ const terminalInclude = {
 } as const;
 
 export async function GET(request: NextRequest, context: TerminalContext) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;
@@ -46,8 +46,8 @@ export async function GET(request: NextRequest, context: TerminalContext) {
 }
 
 export async function PATCH(request: NextRequest, context: TerminalContext) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;
@@ -94,8 +94,8 @@ export async function PATCH(request: NextRequest, context: TerminalContext) {
 }
 
 export async function DELETE(request: NextRequest, context: TerminalContext) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;

@@ -20,8 +20,8 @@ const posInclude = {
  * - Updates the machine's current assignment fields
  */
 export async function POST(request: NextRequest, context: Context) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const { id } = await context.params;

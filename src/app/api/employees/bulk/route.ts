@@ -31,8 +31,8 @@ function getDuplicates(values: string[]): string[] {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request);
-  if (auth) return auth;
+  const auth = await requireAuth(request);
+  if ("error" in auth) return auth.error;
 
   try {
     const body = await request.json();
