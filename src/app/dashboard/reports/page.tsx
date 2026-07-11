@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
   FileText, Download, Filter, ChevronDown, ChevronRight,
   MapPin, Users, Monitor, Wallet, Calculator,
-  X, Check, FileSpreadsheet, Printer,
+  X, Check, FileSpreadsheet, Printer, RefreshCw, AlertCircle,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -16,45 +16,23 @@ type ReportId =
   | "pos-fleet"
   | "station-summary";
 
-// ─── Seed data (mirrors what lives in the other pages) ────────────────────────
+type StationOption = { id: string; name: string; region: string };
+type SupervisorOption = { id: string; firstName: string; lastName: string };
 
-const STATIONS = [
-  { id: "STN-001", name: "Meskel Square Terminal", region: "Addis Ababa", zone: "Central", employeeCount: 2, posCount: 1, terminalCount: 2 },
-  { id: "STN-002", name: "Bole Station",            region: "Addis Ababa", zone: "East",    employeeCount: 1, posCount: 0, terminalCount: 0 },
-  { id: "STN-003", name: "Piassa Hub",              region: "Addis Ababa", zone: "North",   employeeCount: 0, posCount: 1, terminalCount: 0 },
-];
+// ─── Shared API helper ────────────────────────────────────────────────────────
 
-const EMPLOYEES = [
-  { id: "EMP-001", name: "Abebe Girma Tadesse",   role: "Supervisor", station: "Meskel Square Terminal", stationId: "STN-001", salary: 8500,  pos: "POS-AA-001", employmentDate: "2021-03-15", phone: "0911234567", sex: "Male" },
-  { id: "EMP-002", name: "Tigist Haile Mekonen",  role: "Ticketer",   station: "Meskel Square Terminal", stationId: "STN-001", salary: 6200,  pos: "",           employmentDate: "2022-07-01", phone: "0922345678", sex: "Female" },
-  { id: "EMP-003", name: "Dawit Tesfaye Bekele",  role: "Cashier",    station: "Bole Station",           stationId: "STN-002", salary: 6200,  pos: "POS-AA-003", employmentDate: "2023-01-20", phone: "0933456789", sex: "Male" },
-  { id: "EMP-004", name: "Sara Kebede Alemu",     role: "Supervisor", station: "Piassa Hub",             stationId: "STN-003", salary: 9000,  pos: "",           employmentDate: "2020-11-05", phone: "0944567890", sex: "Female" },
-];
+async function apiFetch<T>(path: string): Promise<T> {
+  const res = await fetch(path);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.message ?? json?.error ?? `Request failed: ${res.status}`);
+  return json as T;
+}
 
-const POS_MACHINES = [
-  { id: "POS-001", serial: "VFN-240M-AA001", make: "Verifone",      model: "V240m",        status: "Active",      appVersion: "ORO Ticket v2.4.1", station: "Meskel Square Terminal", employee: "Abebe Girma Tadesse",  lastAssigned: "2024-03-01" },
-  { id: "POS-002", serial: "PAX-A920-AA002", make: "PAX Technology",model: "A920",          status: "Active",      appVersion: "ORO Ticket v2.4.1", station: "Meskel Square Terminal", employee: "Tigist Haile Mekonen", lastAssigned: "2023-06-01" },
-  { id: "POS-003", serial: "ING-MV5K-AA003", make: "Ingenico",      model: "Move 5000",    status: "Maintenance", appVersion: "ORO Ticket v2.3.8", station: "Bole Station",           employee: "",                    lastAssigned: "2022-11-01" },
-  { id: "POS-004", serial: "VFN-240M-AA004", make: "Verifone",      model: "V240m",        status: "Idle",        appVersion: "ORO Ticket v2.2.5", station: "Piassa Hub",             employee: "",                    lastAssigned: "" },
-];
-
-const PETTY_CASH = [
-  { id: "pc1", employeeId: "EMP-001", employee: "Abebe Girma Tadesse", station: "Meskel Square Terminal", amount: 2000, date: "2024-11-01", method: "Bank Transfer", reference: "TXN-001-2024", note: "Monthly ops float" },
-  { id: "pc2", employeeId: "EMP-001", employee: "Abebe Girma Tadesse", station: "Meskel Square Terminal", amount: 1500, date: "2024-12-10", method: "Telebirr",      reference: "TLB-998877",   note: "" },
-  { id: "pc3", employeeId: "EMP-004", employee: "Sara Kebede Alemu",   station: "Piassa Hub",             amount: 3000, date: "2024-11-20", method: "Cheque",        reference: "CHQ-00441",    note: "Q4 float" },
-  { id: "pc4", employeeId: "EMP-004", employee: "Sara Kebede Alemu",   station: "Piassa Hub",             amount: 1200, date: "2025-01-05", method: "Bank Transfer", reference: "TXN-002-2025", note: "" },
-];
-
-const TERMINALS = [
-  { stationId: "STN-001", stationName: "Meskel Square Terminal", terminalName: "Bole Station", distanceKm: 12.5, roadType: "Asphalt", asphaltKm: 12.5, gravelKm: 0,   isDeparture: true,  isArrival: false },
-  { stationId: "STN-001", stationName: "Meskel Square Terminal", terminalName: "Hayat Stop",   distanceKm: 18.0, roadType: "Mixed",   asphaltKm: 11.0, gravelKm: 7.0,  isDeparture: false, isArrival: true  },
-];
-
-const FARE_MATRIX: Record<string, Record<string, { asphalt: number; gravel: number }>> = {
-  Bus:     { "Level 1": { asphalt: 0.85, gravel: 1.10 }, "Level 2": { asphalt: 1.20, gravel: 1.55 }, "Level 3": { asphalt: 1.65, gravel: 2.05 } },
-  Midbus:  { "Level 1": { asphalt: 1.05, gravel: 1.35 }, "Level 2": { asphalt: 1.45, gravel: 1.80 }, "Level 3": { asphalt: 1.90, gravel: 2.30 } },
-  Minibus: { "Level 1": { asphalt: 1.30, gravel: 1.60 }, "Level 2": { asphalt: 1.75, gravel: 2.10 }, "Level 3": { asphalt: 2.20, gravel: 2.65 } },
-};
+function qs(params: Record<string, string>) {
+  const usp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v && v !== "ALL") usp.set(k, v);
+  return usp.toString();
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -62,16 +40,15 @@ function fmtCurrency(n: number) {
   return n.toLocaleString("en-ET", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ETB";
 }
 
-function fmtDate(iso: string) {
+function fmtDate(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 // ─── Export helpers — client-side, no extra deps ──────────────────────────────
 
-function exportCSV(filename: string, headers: string[], rows: (string | number)[][][]) {
-  const allRows = rows.flat();
-  const csv = [headers, ...allRows]
+function exportCSV(filename: string, headers: string[], rows: (string | number)[][]) {
+  const csv = [headers, ...rows]
     .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
     .join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -209,73 +186,92 @@ function SummaryChip({ label, value, color }: { label: string; value: string | n
   );
 }
 
+function ReportState({ loading, error, onRetry }: { loading: boolean; error: string | null; onRetry: () => void }) {
+  if (loading) {
+    return (
+      <div style={{ padding: "40px 14px", textAlign: "center", color: "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <RefreshCw size={16} style={{ animation: "spin 1s linear infinite" }} /> Loading report…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div style={{ padding: "40px 14px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+        <AlertCircle size={22} color="#dc2626" />
+        <p style={{ fontSize: 13, color: "#dc2626" }}>{error}</p>
+        <button onClick={onRetry} style={{ height: 32, padding: "0 12px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>Retry</button>
+      </div>
+    );
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // REPORT 1 — Fare Summary
 // ─────────────────────────────────────────────────────────────────────────────
 
-function FareSummaryReport() {
-  const [stationId, setStationId]   = useState("ALL");
-  const [busType,   setBusType]     = useState("ALL");
-  const [busLevel,  setBusLevel]    = useState("ALL");
+const BUS_TYPE_OPTIONS = [{ value: "BUS", label: "Bus" }, { value: "MIDBUS", label: "Midbus" }, { value: "MINIBUS", label: "Minibus" }];
+const BUS_LEVEL_OPTIONS = [{ value: "LEVEL_1", label: "Level 1" }, { value: "LEVEL_2", label: "Level 2" }, { value: "LEVEL_3", label: "Level 3" }];
 
-  const busTypes  = ["Bus", "Midbus", "Minibus"];
-  const busLevels = ["Level 1", "Level 2", "Level 3"];
+type FareRow = {
+  stationName: string; terminalName: string; distanceKm: number; roadType: string;
+  busType: string; busLevel: string; asphaltRate: number; gravelRate: number; totalFare: number;
+};
 
-  // Build rows: each terminal × each matching busType × each matching level
-  const rows: (string | number)[][] = [];
+function FareSummaryReport({ stations }: { stations: StationOption[] }) {
+  const [stationId, setStationId] = useState("ALL");
+  const [busType,   setBusType]   = useState("ALL");
+  const [busLevel,  setBusLevel]  = useState("ALL");
+  const [data,    setData]    = useState<FareRow[]>([]);
+  const [summary, setSummary] = useState<{ totalRoutes: number; minFare: number | null; maxFare: number | null } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
-  for (const t of TERMINALS) {
-    if (stationId !== "ALL" && t.stationId !== stationId) continue;
-    const types  = busType  !== "ALL" ? [busType]  : busTypes;
-    const levels = busLevel !== "ALL" ? [busLevel] : busLevels;
-    for (const bt of types) {
-      for (const bl of levels) {
-        const rates = FARE_MATRIX[bt]?.[bl];
-        if (!rates) continue;
-        const fare = rates.asphalt * t.asphaltKm + rates.gravel * t.gravelKm;
-        rows.push([
-          t.stationName,
-          t.terminalName,
-          `${t.distanceKm} km`,
-          t.roadType,
-          bt,
-          bl,
-          fmtCurrency(rates.asphalt),
-          fmtCurrency(rates.gravel),
-          fmtCurrency(fare),
-        ]);
-      }
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const res = await apiFetch<{ data: FareRow[]; summary: typeof summary }>(`/api/report?type=fare-summary&${qs({ stationId, busType, busLevel })}`);
+      setData(res.data); setSummary(res.summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report.");
+    } finally {
+      setLoading(false);
     }
   }
 
+  useEffect(() => { load(); }, [stationId, busType, busLevel]);
+
   const headers = ["Station", "Terminal", "Distance", "Road Type", "Bus Type", "Level", "Asphalt Rate/km", "Gravel Rate/km", "Total Fare"];
+  const rows: (string | number)[][] = data.map(r => [
+    r.stationName, r.terminalName, `${r.distanceKm} km`, r.roadType,
+    r.busType, r.busLevel, fmtCurrency(r.asphaltRate), fmtCurrency(r.gravelRate), fmtCurrency(r.totalFare),
+  ]);
 
   return (
     <div>
-      {/* Filters */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
         <Select label="Station" value={stationId} onChange={setStationId}
-          options={[{ value: "ALL", label: "All stations" }, ...STATIONS.map(s => ({ value: s.id, label: s.name }))]} />
+          options={[{ value: "ALL", label: "All stations" }, ...stations.map(s => ({ value: s.id, label: s.name }))]} />
         <Select label="Bus type" value={busType} onChange={setBusType}
-          options={[{ value: "ALL", label: "All types" }, ...busTypes.map(b => ({ value: b, label: b }))]} />
+          options={[{ value: "ALL", label: "All types" }, ...BUS_TYPE_OPTIONS]} />
         <Select label="Bus level" value={busLevel} onChange={setBusLevel}
-          options={[{ value: "ALL", label: "All levels" }, ...busLevels.map(l => ({ value: l, label: l }))]} />
+          options={[{ value: "ALL", label: "All levels" }, ...BUS_LEVEL_OPTIONS]} />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
-            onCSV={() => exportCSV("fare-summary", headers, [rows])}
+            onCSV={() => exportCSV("fare-summary", headers, rows)}
             onPDF={() => exportHTML("fare-summary", "Fare Summary Report", headers, rows)}
           />
         </div>
       </div>
 
-      {/* Summary chips */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Routes" value={rows.length} color="#2563eb" />
-        <SummaryChip label="Min fare" value={rows.length ? fmtCurrency(Math.min(...rows.map(r => parseFloat(String(r[8]).replace(" ETB","").replace(/,/g,""))))) : "—"} color="#16a34a" />
-        <SummaryChip label="Max fare" value={rows.length ? fmtCurrency(Math.max(...rows.map(r => parseFloat(String(r[8]).replace(" ETB","").replace(/,/g,""))))) : "—"} color="#d97706" />
+        <SummaryChip label="Routes" value={summary?.totalRoutes ?? 0} color="#2563eb" />
+        <SummaryChip label="Min fare" value={summary?.minFare != null ? fmtCurrency(summary.minFare) : "—"} color="#16a34a" />
+        <SummaryChip label="Max fare" value={summary?.maxFare != null ? fmtCurrency(summary.maxFare) : "—"} color="#d97706" />
       </div>
 
-      <Table headers={headers} rows={rows} />
+      <ReportState loading={loading} error={error} onRetry={load} />
+      {!loading && !error && <Table headers={headers} rows={rows} />}
     </div>
   );
 }
@@ -284,54 +280,62 @@ function FareSummaryReport() {
 // REPORT 2 — Petty Cash Ledger
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PettyCashLedger() {
+type PettyCashRow = { employeeName: string; station: string; amount: number; date: string; method: string; reference: string; note: string | null };
+
+function PettyCashLedger({ stations, supervisors }: { stations: StationOption[]; supervisors: SupervisorOption[] }) {
   const [stationId,  setStationId]  = useState("ALL");
   const [employeeId, setEmployeeId] = useState("ALL");
   const [fromDate,   setFromDate]   = useState("");
   const [toDate,     setToDate]     = useState("");
+  const [data,    setData]    = useState<PettyCashRow[]>([]);
+  const [summary, setSummary] = useState<{ totalRecords: number; totalDisbursed: number; avgPerEntry: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
-  const supervisors = EMPLOYEES.filter(e => e.role === "Supervisor");
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const res = await apiFetch<{ data: PettyCashRow[]; summary: typeof summary }>(`/api/report?type=petty-cash-ledger&${qs({ stationId, employeeId, from: fromDate, to: toDate })}`);
+      setData(res.data); setSummary(res.summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const filtered = PETTY_CASH.filter(p => {
-    if (stationId  !== "ALL" && EMPLOYEES.find(e => e.id === p.employeeId)?.stationId !== stationId) return false;
-    if (employeeId !== "ALL" && p.employeeId !== employeeId) return false;
-    if (fromDate && p.date < fromDate) return false;
-    if (toDate   && p.date > toDate)   return false;
-    return true;
-  });
+  useEffect(() => { load(); }, [stationId, employeeId, fromDate, toDate]);
 
-  const total = filtered.reduce((s, p) => s + p.amount, 0);
   const headers = ["Employee", "Station", "Amount (ETB)", "Date", "Method", "Reference", "Note"];
-  const rows: (string | number)[][] = filtered.map(p => [
-    p.employee, p.station,
-    fmtCurrency(p.amount), fmtDate(p.date),
-    p.method, p.reference, p.note || "—",
+  const rows: (string | number)[][] = data.map(p => [
+    p.employeeName, p.station, fmtCurrency(p.amount), fmtDate(p.date), p.method, p.reference, p.note || "—",
   ]);
 
   return (
     <div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
         <Select label="Station" value={stationId} onChange={setStationId}
-          options={[{ value: "ALL", label: "All stations" }, ...STATIONS.map(s => ({ value: s.id, label: s.name }))]} />
+          options={[{ value: "ALL", label: "All stations" }, ...stations.map(s => ({ value: s.id, label: s.name }))]} />
         <Select label="Supervisor" value={employeeId} onChange={setEmployeeId}
-          options={[{ value: "ALL", label: "All supervisors" }, ...supervisors.map(e => ({ value: e.id, label: e.name }))]} />
+          options={[{ value: "ALL", label: "All supervisors" }, ...supervisors.map(e => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))]} />
         <DateInput label="From date" value={fromDate} onChange={setFromDate} />
         <DateInput label="To date"   value={toDate}   onChange={setToDate} />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
-            onCSV={() => exportCSV("petty-cash-ledger", headers, [rows])}
+            onCSV={() => exportCSV("petty-cash-ledger", headers, rows)}
             onPDF={() => exportHTML("petty-cash-ledger", "Petty Cash Ledger", headers, rows)}
           />
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Disbursements" value={filtered.length} color="#7c3aed" />
-        <SummaryChip label="Total disbursed" value={fmtCurrency(total)} color="#dc2626" />
-        <SummaryChip label="Avg per entry" value={filtered.length ? fmtCurrency(total / filtered.length) : "—"} color="#d97706" />
+        <SummaryChip label="Disbursements" value={summary?.totalRecords ?? 0} color="#7c3aed" />
+        <SummaryChip label="Total disbursed" value={fmtCurrency(summary?.totalDisbursed ?? 0)} color="#dc2626" />
+        <SummaryChip label="Avg per entry" value={summary?.totalRecords ? fmtCurrency(summary.avgPerEntry) : "—"} color="#d97706" />
       </div>
 
-      <Table headers={headers} rows={rows} />
+      <ReportState loading={loading} error={error} onRetry={load} />
+      {!loading && !error && <Table headers={headers} rows={rows} />}
     </div>
   );
 }
@@ -340,50 +344,69 @@ function PettyCashLedger() {
 // REPORT 3 — Staff Roster
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StaffRoster() {
+const ROLE_OPTIONS = [{ value: "SUPERVISOR", label: "Supervisor" }, { value: "TICKETER", label: "Ticketer" }, { value: "CASHIER", label: "Cashier" }];
+const SEX_OPTIONS = [{ value: "MALE", label: "Male" }, { value: "FEMALE", label: "Female" }];
+
+type StaffRow = {
+  code: string; fullName: string; role: string; stationName: string | null; phone: string;
+  sex: string; employmentDate: string | null; basicSalary: number; posMachines: { serial: string }[];
+};
+
+function StaffRoster({ stations }: { stations: StationOption[] }) {
   const [stationId, setStationId] = useState("ALL");
   const [role,      setRole]      = useState("ALL");
   const [sex,       setSex]       = useState("ALL");
+  const [data,    setData]    = useState<StaffRow[]>([]);
+  const [summary, setSummary] = useState<{ totalEmployees: number; withPOS: number; totalSalary: number; byRole: Record<string, number> } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
-  const filtered = EMPLOYEES.filter(e => {
-    if (stationId !== "ALL" && e.stationId !== stationId) return false;
-    if (role      !== "ALL" && e.role      !== role)      return false;
-    if (sex       !== "ALL" && e.sex       !== sex)       return false;
-    return true;
-  });
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const res = await apiFetch<{ data: StaffRow[]; summary: typeof summary }>(`/api/report?type=staff-roster&${qs({ stationId, role, sex })}`);
+      setData(res.data); setSummary(res.summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const totalSalary = filtered.reduce((s, e) => s + e.salary, 0);
-  const headers = ["ID", "Full Name", "Role", "Station", "Phone", "Sex", "Employment Date", "Salary (ETB)", "POS Assigned"];
-  const rows: (string | number)[][] = filtered.map(e => [
-    e.id, e.name, e.role, e.station, e.phone, e.sex,
-    fmtDate(e.employmentDate), fmtCurrency(e.salary), e.pos || "—",
+  useEffect(() => { load(); }, [stationId, role, sex]);
+
+  const headers = ["Code", "Full Name", "Role", "Station", "Phone", "Sex", "Employment Date", "Salary (ETB)", "POS Assigned"];
+  const rows: (string | number)[][] = data.map(e => [
+    e.code, e.fullName, e.role, e.stationName ?? "—", e.phone, e.sex,
+    fmtDate(e.employmentDate), fmtCurrency(e.basicSalary), e.posMachines[0]?.serial ?? "—",
   ]);
 
   return (
     <div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
         <Select label="Station" value={stationId} onChange={setStationId}
-          options={[{ value: "ALL", label: "All stations" }, ...STATIONS.map(s => ({ value: s.id, label: s.name }))]} />
+          options={[{ value: "ALL", label: "All stations" }, ...stations.map(s => ({ value: s.id, label: s.name }))]} />
         <Select label="Role" value={role} onChange={setRole}
-          options={[{ value: "ALL", label: "All roles" }, { value: "Supervisor", label: "Supervisor" }, { value: "Ticketer", label: "Ticketer" }, { value: "Cashier", label: "Cashier" }]} />
+          options={[{ value: "ALL", label: "All roles" }, ...ROLE_OPTIONS]} />
         <Select label="Sex" value={sex} onChange={setSex}
-          options={[{ value: "ALL", label: "All" }, { value: "Male", label: "Male" }, { value: "Female", label: "Female" }]} />
+          options={[{ value: "ALL", label: "All" }, ...SEX_OPTIONS]} />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
-            onCSV={() => exportCSV("staff-roster", headers, [rows])}
+            onCSV={() => exportCSV("staff-roster", headers, rows)}
             onPDF={() => exportHTML("staff-roster", "Staff Roster", headers, rows)}
           />
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Total staff" value={filtered.length} color="#2563eb" />
-        <SummaryChip label="Supervisors" value={filtered.filter(e => e.role === "Supervisor").length} color="#7c3aed" />
-        <SummaryChip label="With POS" value={filtered.filter(e => e.pos).length} color="#16a34a" />
-        <SummaryChip label="Total salary" value={fmtCurrency(totalSalary)} color="#d97706" />
+        <SummaryChip label="Total staff" value={summary?.totalEmployees ?? 0} color="#2563eb" />
+        <SummaryChip label="Supervisors" value={summary?.byRole?.SUPERVISOR ?? 0} color="#7c3aed" />
+        <SummaryChip label="With POS" value={summary?.withPOS ?? 0} color="#16a34a" />
+        <SummaryChip label="Total salary" value={fmtCurrency(summary?.totalSalary ?? 0)} color="#d97706" />
       </div>
 
-      <Table headers={headers} rows={rows} />
+      <ReportState loading={loading} error={error} onRetry={load} />
+      {!loading && !error && <Table headers={headers} rows={rows} />}
     </div>
   );
 }
@@ -392,43 +415,61 @@ function StaffRoster() {
 // REPORT 4 — POS Fleet Overview
 // ─────────────────────────────────────────────────────────────────────────────
 
-function POSFleetReport() {
+const POS_STATUS_OPTIONS = [{ value: "ACTIVE", label: "Active" }, { value: "IDLE", label: "Idle" }, { value: "MAINTENANCE", label: "Maintenance" }, { value: "DECOMMISSIONED", label: "Decommissioned" }];
+
+type PosFleetRow = {
+  code: string; serial: string; make: string; model: string; status: string;
+  stationName: string | null; employeeName: string | null; appVersion: string;
+  isUpToDate: boolean | null; currentAssignmentSince: string | null;
+};
+
+function POSFleetReport({ stations }: { stations: StationOption[] }) {
   const [stationId, setStationId] = useState("ALL");
   const [status,    setStatus]    = useState("ALL");
   const [version,   setVersion]   = useState("ALL");
+  const [data,    setData]    = useState<PosFleetRow[]>([]);
+  const [summary, setSummary] = useState<{ total: number; byStatus: Record<string, number>; outdated: number | null } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
-  const latestVersion = "ORO Ticket v2.4.1";
-  const versions = [...new Set(POS_MACHINES.map(p => p.appVersion))];
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const res = await apiFetch<{ data: PosFleetRow[]; summary: typeof summary }>(`/api/report?type=pos-fleet&${qs({ stationId, status })}`);
+      setData(res.data); setSummary(res.summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const filtered = POS_MACHINES.filter(p => {
-    const st = STATIONS.find(s => s.name === p.station);
-    if (stationId !== "ALL" && st?.id !== stationId) return false;
-    if (status    !== "ALL" && p.status    !== status)    return false;
-    if (version   !== "ALL" && p.appVersion !== version)  return false;
-    return true;
-  });
+  useEffect(() => { load(); }, [stationId, status]);
 
-  const headers = ["ID", "Serial", "Make", "Model", "Status", "Station", "Operator", "App Version", "Up to date", "Last Assigned"];
+  const versions = [...new Set(data.map(p => p.appVersion))];
+  const filtered = version === "ALL" ? data : data.filter(p => p.appVersion === version);
+
+  const headers = ["Code", "Serial", "Make", "Model", "Status", "Station", "Operator", "App Version", "Up to date", "Assigned since"];
   const rows: (string | number)[][] = filtered.map(p => [
-    p.id, p.serial, p.make, p.model, p.status,
-    p.station, p.employee || "Unassigned",
+    p.code, p.serial, p.make, p.model, p.status,
+    p.stationName ?? "—", p.employeeName ?? "Unassigned",
     p.appVersion,
-    p.appVersion === latestVersion ? "✓ Yes" : "✗ No",
-    fmtDate(p.lastAssigned),
+    p.isUpToDate ? "✓ Yes" : "✗ No",
+    fmtDate(p.currentAssignmentSince),
   ]);
 
   return (
     <div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
         <Select label="Station" value={stationId} onChange={setStationId}
-          options={[{ value: "ALL", label: "All stations" }, ...STATIONS.map(s => ({ value: s.id, label: s.name }))]} />
+          options={[{ value: "ALL", label: "All stations" }, ...stations.map(s => ({ value: s.id, label: s.name }))]} />
         <Select label="Status" value={status} onChange={setStatus}
-          options={[{ value: "ALL", label: "All statuses" }, { value: "Active", label: "Active" }, { value: "Idle", label: "Idle" }, { value: "Maintenance", label: "Maintenance" }, { value: "Decommissioned", label: "Decommissioned" }]} />
+          options={[{ value: "ALL", label: "All statuses" }, ...POS_STATUS_OPTIONS]} />
         <Select label="App version" value={version} onChange={setVersion}
           options={[{ value: "ALL", label: "All versions" }, ...versions.map(v => ({ value: v, label: v }))]} />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
-            onCSV={() => exportCSV("pos-fleet", headers, [rows])}
+            onCSV={() => exportCSV("pos-fleet", headers, rows)}
             onPDF={() => exportHTML("pos-fleet", "POS Fleet Overview", headers, rows)}
           />
         </div>
@@ -436,12 +477,13 @@ function POSFleetReport() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
         <SummaryChip label="Total machines" value={filtered.length} color="#2563eb" />
-        <SummaryChip label="Active" value={filtered.filter(p => p.status === "Active").length} color="#16a34a" />
-        <SummaryChip label="Need update" value={filtered.filter(p => p.appVersion !== latestVersion).length} color="#d97706" />
-        <SummaryChip label="In maintenance" value={filtered.filter(p => p.status === "Maintenance").length} color="#dc2626" />
+        <SummaryChip label="Active" value={summary?.byStatus?.ACTIVE ?? 0} color="#16a34a" />
+        <SummaryChip label="Need update" value={summary?.outdated ?? 0} color="#d97706" />
+        <SummaryChip label="In maintenance" value={summary?.byStatus?.MAINTENANCE ?? 0} color="#dc2626" />
       </div>
 
-      <Table headers={headers} rows={rows} />
+      <ReportState loading={loading} error={error} onRetry={load} />
+      {!loading && !error && <Table headers={headers} rows={rows} />}
     </div>
   );
 }
@@ -450,41 +492,42 @@ function POSFleetReport() {
 // REPORT 5 — Station Summary
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StationSummaryReport() {
+type StationSummaryRow = {
+  code: string; name: string; region: string; zone: string;
+  employeeCount: number; supervisorCount: number; posMachineCount: number; activePosCount: number;
+  terminalCount: number; totalDistanceKm: number; monthlySalary: number; totalPettyCash: number;
+};
+
+function StationSummaryReport({ stations }: { stations: StationOption[] }) {
   const [region, setRegion] = useState("ALL");
+  const [data,    setData]    = useState<StationSummaryRow[]>([]);
+  const [summary, setSummary] = useState<{ totalStations: number; totalEmployees: number; grandMonthlySalary: number; grandPettyCash: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
-  const regions = [...new Set(STATIONS.map(s => s.region))];
+  const regions = [...new Set(stations.map(s => s.region))];
 
-  const filtered = STATIONS.filter(s => region === "ALL" || s.region === region);
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const res = await apiFetch<{ data: StationSummaryRow[]; summary: typeof summary }>(`/api/report?type=station-summary&${qs({ region })}`);
+      setData(res.data); setSummary(res.summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  // Enrich with computed fields
-  const enriched = filtered.map(s => {
-    const emps     = EMPLOYEES.filter(e => e.stationId === s.id);
-    const poses    = POS_MACHINES.filter(p => STATIONS.find(st => st.id === s.id)?.name === p.station);
-    const terms    = TERMINALS.filter(t => t.stationId === s.id);
-    const totalKm  = terms.reduce((a, t) => a + t.distanceKm, 0);
-    const salary   = emps.reduce((a, e) => a + e.salary, 0);
-    const pettyCashTotal = PETTY_CASH
-      .filter(p => emps.find(e => e.id === p.employeeId))
-      .reduce((a, p) => a + p.amount, 0);
-    return { ...s, emps, poses, terms, totalKm, salary, pettyCashTotal };
-  });
+  useEffect(() => { load(); }, [region]);
 
-  const headers = ["ID", "Station", "Region", "Zone", "Employees", "Supervisors", "POS Machines", "Active POS", "Terminals", "Total Distance (km)", "Monthly Salary", "Petty Cash Held"];
-  const rows: (string | number)[][] = enriched.map(s => [
-    s.id, s.name, s.region, s.zone,
-    s.emps.length,
-    s.emps.filter(e => e.role === "Supervisor").length,
-    s.poses.length,
-    s.poses.filter(p => p.status === "Active").length,
-    s.terms.length,
-    s.totalKm.toFixed(1),
-    fmtCurrency(s.salary),
-    fmtCurrency(s.pettyCashTotal),
+  const headers = ["Code", "Station", "Region", "Zone", "Employees", "Supervisors", "POS Machines", "Active POS", "Terminals", "Total Distance (km)", "Monthly Salary", "Petty Cash Held"];
+  const rows: (string | number)[][] = data.map(s => [
+    s.code, s.name, s.region, s.zone,
+    s.employeeCount, s.supervisorCount, s.posMachineCount, s.activePosCount,
+    s.terminalCount, s.totalDistanceKm.toFixed(1),
+    fmtCurrency(s.monthlySalary), fmtCurrency(s.totalPettyCash),
   ]);
-
-  const grandSalary     = enriched.reduce((a, s) => a + s.salary, 0);
-  const grandPettyCash  = enriched.reduce((a, s) => a + s.pettyCashTotal, 0);
 
   return (
     <div>
@@ -493,76 +536,71 @@ function StationSummaryReport() {
           options={[{ value: "ALL", label: "All regions" }, ...regions.map(r => ({ value: r, label: r }))]} />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
-            onCSV={() => exportCSV("station-summary", headers, [rows])}
+            onCSV={() => exportCSV("station-summary", headers, rows)}
             onPDF={() => exportHTML("station-summary", "Station Summary", headers, rows)}
           />
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Stations" value={enriched.length} color="#2563eb" />
-        <SummaryChip label="Total staff" value={enriched.reduce((a, s) => a + s.emps.length, 0)} color="#7c3aed" />
-        <SummaryChip label="Total salary" value={fmtCurrency(grandSalary)} color="#d97706" />
-        <SummaryChip label="Total petty cash" value={fmtCurrency(grandPettyCash)} color="#dc2626" />
+        <SummaryChip label="Stations" value={summary?.totalStations ?? 0} color="#2563eb" />
+        <SummaryChip label="Total staff" value={summary?.totalEmployees ?? 0} color="#7c3aed" />
+        <SummaryChip label="Total salary" value={fmtCurrency(summary?.grandMonthlySalary ?? 0)} color="#d97706" />
+        <SummaryChip label="Total petty cash" value={fmtCurrency(summary?.grandPettyCash ?? 0)} color="#dc2626" />
       </div>
 
-      <Table headers={headers} rows={rows} />
+      <ReportState loading={loading} error={error} onRetry={load} />
+      {!loading && !error && <Table headers={headers} rows={rows} />}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REPORT DEFINITIONS
-// ─────────────────────────────────────────────────────────────────────────────
-
-const REPORTS: {
-  id: ReportId; label: string; description: string;
-  icon: React.ReactNode; color: string; lightColor: string;
-  component: React.ReactNode;
-}[] = [
-  {
-    id: "fare-summary", label: "Fare Summary",
-    description: "Calculated fares for every route × bus type × level combination",
-    icon: <Calculator size={18} />, color: "#2563eb", lightColor: "#dbeafe",
-    component: <FareSummaryReport />,
-  },
-  {
-    id: "petty-cash-ledger", label: "Petty Cash Ledger",
-    description: "Full disbursement log for all supervisors with date range and totals",
-    icon: <Wallet size={18} />, color: "#7c3aed", lightColor: "#ede9fe",
-    component: <PettyCashLedger />,
-  },
-  {
-    id: "staff-roster", label: "Staff Roster",
-    description: "All employees across stations — role, salary, POS assignment",
-    icon: <Users size={18} />, color: "#0369a1", lightColor: "#e0f2fe",
-    component: <StaffRoster />,
-  },
-  {
-    id: "pos-fleet", label: "POS Fleet",
-    description: "All POS machines — status, operator, app version, last assignment date",
-    icon: <Monitor size={18} />, color: "#16a34a", lightColor: "#dcfce7",
-    component: <POSFleetReport />,
-  },
-  {
-    id: "station-summary", label: "Station Summary",
-    description: "Per-station rollup of staff, machines, terminals, salary and petty cash",
-    icon: <MapPin size={18} />, color: "#d97706", lightColor: "#fef3c7",
-    component: <StationSummaryReport />,
-  },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
+const REPORT_DEFS: { id: ReportId; label: string; description: string; icon: React.ReactNode; color: string; lightColor: string }[] = [
+  { id: "fare-summary", label: "Fare Summary", description: "Calculated fares for every route × bus type × level combination", icon: <Calculator size={18} />, color: "#2563eb", lightColor: "#dbeafe" },
+  { id: "petty-cash-ledger", label: "Petty Cash Ledger", description: "Full disbursement log for all supervisors with date range and totals", icon: <Wallet size={18} />, color: "#7c3aed", lightColor: "#ede9fe" },
+  { id: "staff-roster", label: "Staff Roster", description: "All employees across stations — role, salary, POS assignment", icon: <Users size={18} />, color: "#0369a1", lightColor: "#e0f2fe" },
+  { id: "pos-fleet", label: "POS Fleet", description: "All POS machines — status, operator, app version, last assignment date", icon: <Monitor size={18} />, color: "#16a34a", lightColor: "#dcfce7" },
+  { id: "station-summary", label: "Station Summary", description: "Per-station rollup of staff, machines, terminals, salary and petty cash", icon: <MapPin size={18} />, color: "#d97706", lightColor: "#fef3c7" },
+];
+
 export default function ReportsPage() {
   const [activeId, setActiveId] = useState<ReportId>("fare-summary");
-  const active = REPORTS.find(r => r.id === activeId)!;
+  const [stations, setStations] = useState<StationOption[]>([]);
+  const [supervisors, setSupervisors] = useState<SupervisorOption[]>([]);
+  const [refLoading, setRefLoading] = useState(true);
+  const [refError, setRefError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setRefLoading(true); setRefError(null);
+      try {
+        const [stationsRes, employeesRes] = await Promise.all([
+          apiFetch<{ data: StationOption[] }>("/api/stations?limit=1000"),
+          apiFetch<{ data: (SupervisorOption & { role: string })[] }>("/api/employees?role=SUPERVISOR&limit=1000"),
+        ]);
+        setStations(stationsRes.data);
+        setSupervisors(employeesRes.data);
+      } catch (e) {
+        setRefError(e instanceof Error ? e.message : "Failed to load reference data.");
+      } finally {
+        setRefLoading(false);
+      }
+    })();
+  }, []);
+
+  const active = REPORT_DEFS.find(r => r.id === activeId)!;
 
   return (
     <>
-      <style>{`* { box-sizing: border-box; } input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }`}</style>
+      <style>{`
+        * { box-sizing: border-box; }
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
 
       <div style={{ minHeight: "100vh", background: "var(--background)", display: "flex", flexDirection: "column" }}>
 
@@ -577,7 +615,7 @@ export default function ReportsPage() {
 
           {/* ── Report selector tabs ── */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {REPORTS.map(r => {
+            {REPORT_DEFS.map(r => {
               const isActive = r.id === activeId;
               return (
                 <button key={r.id} onClick={() => setActiveId(r.id)} style={{
@@ -614,7 +652,19 @@ export default function ReportsPage() {
           {/* Report body */}
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
             <div style={{ padding: "20px 20px 0" }}>
-              {active.component}
+              {refLoading ? (
+                <ReportState loading error={null} onRetry={() => {}} />
+              ) : refError ? (
+                <ReportState loading={false} error={refError} onRetry={() => window.location.reload()} />
+              ) : (
+                <>
+                  {activeId === "fare-summary" && <FareSummaryReport stations={stations} />}
+                  {activeId === "petty-cash-ledger" && <PettyCashLedger stations={stations} supervisors={supervisors} />}
+                  {activeId === "staff-roster" && <StaffRoster stations={stations} />}
+                  {activeId === "pos-fleet" && <POSFleetReport stations={stations} />}
+                  {activeId === "station-summary" && <StationSummaryReport stations={stations} />}
+                </>
+              )}
             </div>
           </div>
         </div>
