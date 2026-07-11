@@ -16,6 +16,8 @@ export const PERMISSION_PAGES = [
 
 export type PermissionPage = (typeof PERMISSION_PAGES)[number]["page"];
 
+export const ADMIN_ROLE_VALUES = ["SUPER_ADMIN", "ADMIN", "VIEWER"] as const;
+
 export const ADMIN_ROLE_LABELS: Record<$Enums.AdminRole, string> = {
   SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",

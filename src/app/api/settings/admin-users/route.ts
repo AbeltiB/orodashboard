@@ -1,21 +1,36 @@
 // src/app/api/settings/admin-users/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requireRole } from "@/lib/api-auth";
 import { badRequest, conflict, created, ok, serverError } from "@/lib/api-utils";
 import { createAdminUserSchema } from "@/lib/schemas/settings";
-import { hashPin } from "@/lib/pin";
+import { defaultPermissionsForRole } from "@/lib/permissions";
+
+// Never select otpCodeHash — that's the only sensitive field on this model.
+const safeSelect = {
+  id: true,
+  firstName: true,
+  middleName: true,
+  lastName: true,
+  phone: true,
+  companyEmail: true,
+  personalEmail: true,
+  role: true,
+  isActive: true,
+  permissions: true,
+  lastLoginAt: true,
+  lockedUntil: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireRole(request, ["SUPER_ADMIN"]);
   if ("error" in auth) return auth.error;
 
   try {
     const users = await prisma.adminUser.findMany({
-      select: {
-        id: true, name: true, phone: true, isActive: true, createdAt: true, updatedAt: true,
-        // Never return the PIN hash
-      },
+      select: safeSelect,
       orderBy: { createdAt: "asc" },
     });
 
@@ -26,7 +41,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireRole(request, ["SUPER_ADMIN"]);
   if ("error" in auth) return auth.error;
 
   try {
@@ -40,11 +55,14 @@ export async function POST(request: NextRequest) {
     });
     if (existing) return conflict("An admin user with this phone number already exists.");
 
-    const hashedPin = await hashPin(parsed.data.pin);
+    const { permissions, ...rest } = parsed.data;
 
     const user = await prisma.adminUser.create({
-      data: { name: parsed.data.name, phone: parsed.data.phone, pin: hashedPin },
-      select: { id: true, name: true, phone: true, isActive: true, createdAt: true, updatedAt: true },
+      data: {
+        ...rest,
+        permissions: permissions ?? defaultPermissionsForRole(parsed.data.role),
+      },
+      select: safeSelect,
     });
 
     return created(user);
