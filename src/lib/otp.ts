@@ -1,10 +1,8 @@
 // src/lib/otp.ts
 import crypto from "crypto";
 
-export const OTP_EXPIRY_MINUTES = 5;
-export const OTP_MAX_ATTEMPTS = 5;
-export const OTP_LOCKOUT_MINUTES = 15;
-export const OTP_RESEND_COOLDOWN_SECONDS = 30;
+export { OTP_EXPIRY_MINUTES, OTP_MAX_ATTEMPTS, OTP_LOCKOUT_MINUTES, OTP_RESEND_COOLDOWN_SECONDS } from "./otp-constants";
+import { OTP_EXPIRY_MINUTES } from "./otp-constants";
 
 export function generateOtpCode(): string {
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");

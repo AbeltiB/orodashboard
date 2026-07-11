@@ -13,6 +13,7 @@ import {
   PERMISSION_PAGES, ADMIN_ROLE_VALUES, ADMIN_ROLE_LABELS, defaultPermissionsForRole,
   type PermissionPage,
 } from "@/lib/permissions";
+import { OTP_EXPIRY_MINUTES, OTP_MAX_ATTEMPTS, OTP_LOCKOUT_MINUTES } from "@/lib/otp-constants";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -493,57 +494,30 @@ function UserDetail({ user, isSelf, onEdit, onDelete, onToggleActive }: {
 // ═════════════════════════════════════════════════════════════════════════════
 
 function SecuritySection() {
-  const [pinLen,      setPinLen]      = useState(6);
-  const [maxAttempts, setMaxAttempts] = useState(3);
-  const [lockMins,    setLockMins]    = useState(15);
-  const [sessionHrs,  setSessionHrs]  = useState(8);
-  const [otpExpMins,  setOtpExpMins]  = useState(5);
-  const [saved, setSaved] = useState(false);
-
-  function save() { setSaved(true); setTimeout(() => setSaved(false), 2200); }
-
-  function Row({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
+  function Row({ label, desc, value }: { label: string; desc: string; value: string }) {
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0", borderBottom: "1px solid var(--border)" }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{label}</div>
           <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>{desc}</div>
         </div>
-        {children}
+        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "monospace", color: "var(--foreground)", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 12px" }}>{value}</span>
       </div>
     );
   }
 
-  const numInput = (val: number, set: (n: number) => void, min: number, max: number, suffix: string) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <input type="number" min={min} max={max} value={val} onChange={e => set(Number(e.target.value))}
-        style={{ width: 70, height: 36, padding: "0 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 14, fontWeight: 700, fontFamily: "monospace", outline: "none", color: "var(--foreground)", background: "var(--surface)", textAlign: "center" }} />
-      <span style={{ fontSize: 12, color: "var(--muted-foreground)", fontWeight: 500 }}>{suffix}</span>
-    </div>
-  );
-
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>PIN policy</h3>
-        <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>Rules applied when users set or enter their PIN</p>
+      <div style={{ marginBottom: 24, display: "flex", gap: 10, padding: "12px 14px", background: "color-mix(in srgb, var(--primary) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)", borderRadius: 10 }}>
+        <Info size={16} color="var(--primary)" style={{ flexShrink: 0, marginTop: 1 }} />
+        <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0, lineHeight: 1.6 }}>
+          These thresholds are fixed in code rather than editable here, so the auth flow can't be accidentally weakened from the dashboard. Ask a developer if they need to change.
+        </p>
       </div>
-      <Row label="PIN length"       desc="Number of digits required for a valid PIN">       {numInput(pinLen, setPinLen, 4, 8, "digits")} </Row>
-      <Row label="Max failed attempts" desc="Lock account after this many wrong PIN entries">{numInput(maxAttempts, setMaxAttempts, 1, 10, "attempts")} </Row>
-      <Row label="Lockout duration" desc="How long an account stays locked after too many failures">{numInput(lockMins, setLockMins, 1, 60, "minutes")} </Row>
-
-      <div style={{ marginTop: 28, marginBottom: 24 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Sessions & OTP</h3>
-        <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>Login session and one-time-password settings</p>
-      </div>
-      <Row label="Session duration"  desc="Auto sign-out after this period of inactivity">    {numInput(sessionHrs, setSessionHrs, 1, 24, "hours")} </Row>
-      <Row label="OTP expiry"        desc="SMS one-time-password validity window">            {numInput(otpExpMins, setOtpExpMins, 2, 15, "minutes")} </Row>
-
-      <div style={{ marginTop: 24, display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={save} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: saved ? "#16a34a" : "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, transition: "background 0.2s" }}>
-          {saved ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save security settings</>}
-        </button>
-      </div>
+      <Row label="Session duration" desc="How long a signed-in session stays valid before requiring a fresh OTP" value="7 days" />
+      <Row label="OTP expiry"       desc="How long a one-time code remains valid after being sent" value={`${OTP_EXPIRY_MINUTES} minutes`} />
+      <Row label="Max failed OTP attempts" desc="Wrong-code attempts allowed before the account is locked" value={`${OTP_MAX_ATTEMPTS} attempts`} />
+      <Row label="Lockout duration" desc="How long an account stays locked after too many failed attempts" value={`${OTP_LOCKOUT_MINUTES} minutes`} />
     </div>
   );
 }
@@ -552,16 +526,64 @@ function SecuritySection() {
 // SYSTEM SECTION
 // ═════════════════════════════════════════════════════════════════════════════
 
-function SystemSection() {
-  const [appName,   setAppName]   = useState("OroDashboard");
-  const [company,   setCompany]   = useState("BS Tech Digital");
-  const [timezone,  setTimezone]  = useState("Africa/Addis_Ababa");
-  const [currency,  setCurrency]  = useState("ETB");
-  const [dateFormat,setDateFormat]= useState("DD/MM/YYYY");
-  const [darkMode,  setDarkMode]  = useState(false);
-  const [saved, setSaved] = useState(false);
+const SYSTEM_CONFIG_DEFAULTS = {
+  app_name: "OroDashboard",
+  company_name: "BS Tech Digital",
+  timezone: "Africa/Addis_Ababa",
+  currency: "ETB",
+  date_format: "DD/MM/YYYY",
+};
 
-  function save() { setSaved(true); setTimeout(() => setSaved(false), 2200); }
+function SystemSection() {
+  const [values,  setValues]  = useState<typeof SYSTEM_CONFIG_DEFAULTS>(SYSTEM_CONFIG_DEFAULTS);
+  const [darkMode, setDarkMode] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+  const [saved,   setSaved]   = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
+
+  useEffect(() => {
+    setDarkMode(document.documentElement.classList.contains("dark"));
+    (async () => {
+      try {
+        const res = await apiFetch<{ map: Record<string, string> }>("/api/settings");
+        setValues(v => ({ ...v, ...Object.fromEntries(Object.keys(SYSTEM_CONFIG_DEFAULTS).map(k => [k, res.map[k] ?? v[k as keyof typeof v]])) }));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load system settings.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  function set<K extends keyof typeof SYSTEM_CONFIG_DEFAULTS>(k: K, v: string) {
+    setValues(prev => ({ ...prev, [k]: v }));
+  }
+
+  function toggleDarkMode() {
+    const next = !darkMode;
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("theme", next ? "dark" : "light");
+    setDarkMode(next);
+  }
+
+  async function save() {
+    setSaving(true); setError(null);
+    try {
+      await apiFetch("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          configs: Object.entries(values).map(([key, value]) => ({ key, value })),
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2200);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save system settings.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function Row({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
     return (
@@ -587,37 +609,48 @@ function SystemSection() {
     </select>
   );
 
+  if (loading) {
+    return <div style={{ padding: "20px 0", color: "var(--muted-foreground)", fontSize: 13 }}>Loading system settings…</div>;
+  }
+
   return (
     <div>
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, marginBottom: 16 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
+
       <div style={{ marginBottom: 24 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Identity</h3>
         <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>How the app presents itself</p>
       </div>
-      <Row label="App name"    desc="Displayed in the header and browser tab">{sInput(appName,  setAppName,  "App name")}</Row>
-      <Row label="Company name" desc="Shown in footers and PDF report headers">{sInput(company,  setCompany,  "Company name")}</Row>
+      <Row label="App name"    desc="Display name stored in system config">{sInput(values.app_name, v => set("app_name", v), "App name")}</Row>
+      <Row label="Company name" desc="Shown in footers and PDF report headers">{sInput(values.company_name, v => set("company_name", v), "Company name")}</Row>
 
       <div style={{ marginTop: 28, marginBottom: 24 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Locale & format</h3>
         <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>Regional display settings</p>
       </div>
-      <Row label="Timezone"    desc="Used for all timestamps and date displays">  {sSelect(timezone,  setTimezone,  ["Africa/Addis_Ababa", "UTC", "Europe/London", "America/New_York"])}</Row>
-      <Row label="Currency"    desc="Default currency for fare and salary display">{sSelect(currency,  setCurrency,  ["ETB", "USD", "EUR"])}</Row>
-      <Row label="Date format" desc="How dates are displayed across the system">  {sSelect(dateFormat,setDateFormat,["DD/MM/YYYY","MM/DD/YYYY","YYYY-MM-DD"])}</Row>
+      <Row label="Timezone"    desc="Used for all timestamps and date displays">  {sSelect(values.timezone, v => set("timezone", v), ["Africa/Addis_Ababa", "UTC", "Europe/London", "America/New_York"])}</Row>
+      <Row label="Currency"    desc="Default currency for fare and salary display">{sSelect(values.currency, v => set("currency", v), ["ETB", "USD", "EUR"])}</Row>
+      <Row label="Date format" desc="How dates are displayed across the system">  {sSelect(values.date_format, v => set("date_format", v), ["DD/MM/YYYY","MM/DD/YYYY","YYYY-MM-DD"])}</Row>
 
       <div style={{ marginTop: 28, marginBottom: 24 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Appearance</h3>
-        <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>Theme and display preferences</p>
+        <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>Theme preference for this browser (not shared across devices)</p>
       </div>
       <Row label="Dark mode" desc="Switch the dashboard to a dark colour scheme">
-        <button onClick={() => setDarkMode(v => !v)} style={{ display: "flex", alignItems: "center", gap: 8, height: 36, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", cursor: "pointer", fontSize: 13, fontWeight: 600, color: darkMode ? "#f8fafc" : "var(--foreground)" }}>
+        <button onClick={toggleDarkMode} style={{ display: "flex", alignItems: "center", gap: 8, height: 36, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>
           {darkMode ? <Moon size={14} /> : <Sun size={14} />}
           {darkMode ? "Dark" : "Light"}
         </button>
       </Row>
 
       <div style={{ marginTop: 24, display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={save} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: saved ? "#16a34a" : "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, transition: "background 0.2s" }}>
-          {saved ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save system settings</>}
+        <button onClick={save} disabled={saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: saved ? "#16a34a" : "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, transition: "background 0.2s", opacity: saving ? 0.7 : 1 }}>
+          {saved ? <><Check size={14} /> Saved</> : <><Save size={14} /> {saving ? "Saving…" : "Save system settings"}</>}
         </button>
       </div>
     </div>
@@ -628,40 +661,87 @@ function SystemSection() {
 // NOTIFICATIONS SECTION
 // ═════════════════════════════════════════════════════════════════════════════
 
-function NotificationsSection() {
-  const [settings, setSettings] = useState([
-    { id: "pos_outdated",   label: "Outdated POS app version",       desc: "Alert when a POS machine is not on the latest app version", enabled: true  },
-    { id: "pos_unassigned", label: "Unassigned POS machines",        desc: "Alert when an active POS has no operator assigned",         enabled: true  },
-    { id: "station_no_staff",label: "Station with no staff",         desc: "Alert when a station has zero employees assigned",           enabled: true  },
-    { id: "failed_logins",  label: "Failed login alerts",            desc: "Notify when an account is locked after failed PIN attempts", enabled: true  },
-    { id: "petty_cash_high",label: "High petty cash disbursement",   desc: "Alert when a single disbursement exceeds a threshold",      enabled: false },
-    { id: "new_user_login", label: "New user first login",           desc: "Notify when a new admin logs in for the first time",        enabled: false },
-  ]);
-  const [saved, setSaved] = useState(false);
+const NOTIFICATION_TOGGLES = [
+  { key: "notif_pos_outdated",     label: "Outdated POS app version",     desc: "Alert when a POS machine is not on the latest app version" },
+  { key: "notif_pos_unassigned",   label: "Unassigned POS machines",      desc: "Alert when an active POS has no operator assigned" },
+  { key: "notif_station_no_staff", label: "Station with no staff",        desc: "Alert when a station has zero employees assigned" },
+  { key: "notif_failed_logins",    label: "Failed login alerts",          desc: "Notify when an account is locked after failed OTP attempts" },
+  { key: "notif_petty_cash_high",  label: "High petty cash disbursement", desc: "Alert when a single disbursement exceeds a threshold" },
+  { key: "notif_new_user_login",   label: "New user first login",         desc: "Notify when a new admin logs in for the first time" },
+] as const;
 
-  function toggle(id: string) { setSettings(prev => prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s)); }
-  function save() { setSaved(true); setTimeout(() => setSaved(false), 2200); }
+function NotificationsSection() {
+  const [values,  setValues]  = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+  const [saved,   setSaved]   = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiFetch<{ map: Record<string, string> }>("/api/settings");
+        setValues(Object.fromEntries(NOTIFICATION_TOGGLES.map(t => [t.key, res.map[t.key] !== "false"])));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load notification preferences.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  function toggle(key: string) { setValues(prev => ({ ...prev, [key]: !prev[key] })); }
+
+  async function save() {
+    setSaving(true); setError(null);
+    try {
+      await apiFetch("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          configs: NOTIFICATION_TOGGLES.map(t => ({ key: t.key, value: String(values[t.key]) })),
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2200);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save notification preferences.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <div style={{ padding: "20px 0", color: "var(--muted-foreground)", fontSize: 13 }}>Loading notification preferences…</div>;
+  }
 
   return (
     <div>
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, marginBottom: 16 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
       <div style={{ marginBottom: 24 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Dashboard alerts</h3>
-        <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>Control which issues are surfaced in the dashboard alert banner</p>
+        <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0 }}>
+          Controls which alert preferences are saved — delivery (SMS/email/push) isn&apos;t built yet, this only persists your on/off choice.
+        </p>
       </div>
-      {settings.map((s, i) => (
-        <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: i < settings.length - 1 ? "1px solid var(--border)" : "none" }}>
+      {NOTIFICATION_TOGGLES.map((t, i) => (
+        <div key={t.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: i < NOTIFICATION_TOGGLES.length - 1 ? "1px solid var(--border)" : "none" }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{s.label}</div>
-            <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>{s.desc}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{t.label}</div>
+            <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>{t.desc}</div>
           </div>
-          <button onClick={() => toggle(s.id)} style={{ background: "none", border: "none", cursor: "pointer", flexShrink: 0, marginLeft: 20, color: s.enabled ? "#16a34a" : "#cbd5e1" }}>
-            {s.enabled ? <ToggleRight size={28} color="#16a34a" /> : <ToggleLeft size={28} color="#cbd5e1" />}
+          <button onClick={() => toggle(t.key)} style={{ background: "none", border: "none", cursor: "pointer", flexShrink: 0, marginLeft: 20 }}>
+            {values[t.key] ? <ToggleRight size={28} color="#16a34a" /> : <ToggleLeft size={28} color="#cbd5e1" />}
           </button>
         </div>
       ))}
       <div style={{ marginTop: 24, display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={save} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: saved ? "#16a34a" : "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, transition: "background 0.2s" }}>
-          {saved ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save preferences</>}
+        <button onClick={save} disabled={saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: saved ? "#16a34a" : "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, transition: "background 0.2s", opacity: saving ? 0.7 : 1 }}>
+          {saved ? <><Check size={14} /> Saved</> : <><Save size={14} /> {saving ? "Saving…" : "Save preferences"}</>}
         </button>
       </div>
     </div>

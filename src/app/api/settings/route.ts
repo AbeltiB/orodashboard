@@ -1,7 +1,7 @@
 // src/app/api/settings/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, requireRole } from "@/lib/api-auth";
 import { badRequest, ok, serverError } from "@/lib/api-utils";
 import { bulkUpsertSystemConfigSchema } from "@/lib/schemas/settings";
 
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
  *   ticket_receipt_footer   — footer text on printed tickets
  */
 export async function PUT(request: NextRequest) {
-  const auth = await requireAuth(request);
+  const auth = await requireRole(request, ["SUPER_ADMIN"]);
   if ("error" in auth) return auth.error;
 
   try {
@@ -54,7 +54,7 @@ export async function PUT(request: NextRequest) {
     const parsed = bulkUpsertSystemConfigSchema.safeParse(body);
     if (!parsed.success) return badRequest("Invalid request body.", parsed.error.flatten());
 
-    const updatedBy = request.headers.get("x-admin-id") ?? null;
+    const updatedBy = auth.session.adminUserId;
 
     const results = await prisma.$transaction(
       parsed.data.configs.map((c) =>
