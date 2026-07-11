@@ -24,8 +24,10 @@ export const ADMIN_ROLE_LABELS: Record<$Enums.AdminRole, string> = {
   VIEWER: "Viewer",
 };
 
+const PERMISSION_PAGE_VALUES = PERMISSION_PAGES.map((p) => p.page) as [PermissionPage, ...PermissionPage[]];
+
 export const pagePermissionSchema = z.object({
-  page: z.enum(PERMISSION_PAGES.map((p) => p.page) as [string, ...string[]]),
+  page: z.enum(PERMISSION_PAGE_VALUES),
   canView: z.boolean(),
   canEdit: z.boolean(),
 });
