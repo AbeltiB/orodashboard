@@ -574,7 +574,11 @@ model SalesTrip {
   date                   DateTime
   distanceKm             Decimal  @db.Decimal(10, 2)
   tariff                 Decimal  @db.Decimal(10, 2)
+  // The source reports this as a per-passenger rate, not a trip total —
+  // totalServiceCharge (serviceCharge x passengers) is the actual amount
+  // collected on this trip and is what finance/reporting should sum.
   serviceCharge          Decimal  @db.Decimal(10, 2)
+  totalServiceCharge     Decimal  @db.Decimal(12, 2)
   passengers             Int
   level                  String
 

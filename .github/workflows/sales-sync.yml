@@ -1,10 +1,10 @@
 name: Sales sync (OTA)
 
-# Triggers POST /api/sales/sync on the deployed app every 15 minutes. The
-# route itself is self-governing (skips if a run is already in progress,
-# skips if the source's row count hasn't moved, skips if it's still
-# cooling down from a rate limit) — this workflow's only job is to knock
-# on the door on a schedule and surface failures in the Actions tab.
+# Triggers POST /api/sales/sync on the deployed app once an hour, on the
+# hour. The route itself is self-governing (skips if a run is already in
+# progress, skips if the source's row count hasn't moved, skips if it's
+# still cooling down from a rate limit) — this workflow's only job is to
+# knock on the door on a schedule and surface failures in the Actions tab.
 #
 # Required repo configuration (Settings -> Secrets and variables -> Actions):
 #   Variables: SALES_SYNC_URL   -> e.g. https://your-app.vercel.app/api/sales/sync
@@ -12,7 +12,7 @@ name: Sales sync (OTA)
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch: {}
 
 jobs:

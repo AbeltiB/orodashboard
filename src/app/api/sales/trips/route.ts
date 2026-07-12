@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
     const departureTerminal = searchParams.get("departureTerminal")?.trim();
     const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim();
     const employeeExternalId = searchParams.get("employeeId")?.trim();
+    const plateNo = searchParams.get("plateNo")?.trim();
     const search = searchParams.get("search")?.trim();
 
     const where: Prisma.SalesTripWhereInput = {};
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest) {
     if (departureTerminal) where.departureTerminalName = departureTerminal;
     if (arrivalTerminal) where.arrivalTerminalName = arrivalTerminal;
     if (employeeExternalId) where.employeeExternalId = employeeExternalId;
+    if (plateNo) where.vehiclePlateNo = { contains: plateNo, mode: "insensitive" };
     if (search) {
       where.OR = [
         { employeeName: { contains: search, mode: "insensitive" } },
@@ -40,11 +42,14 @@ export async function GET(request: NextRequest) {
     }
 
     const [trips, total, aggregate] = await Promise.all([
-      prisma.salesTrip.findMany({ where, orderBy: { date: "desc" }, skip: offset, take: limit }),
+      // Newest first, down to the millisecond — the source can log several
+      // trips within the same second, so date alone isn't enough to keep
+      // this stable; id is a tiebreaker only, the real ordering is date desc.
+      prisma.salesTrip.findMany({ where, orderBy: [{ date: "desc" }, { id: "desc" }], skip: offset, take: limit }),
       prisma.salesTrip.count({ where }),
       prisma.salesTrip.aggregate({
         where,
-        _sum: { tariff: true, serviceCharge: true, distanceKm: true, passengers: true },
+        _sum: { tariff: true, serviceCharge: true, totalServiceCharge: true, distanceKm: true, passengers: true },
       }),
     ]);
 
@@ -54,6 +59,7 @@ export async function GET(request: NextRequest) {
       totals: {
         tariff: aggregate._sum.tariff?.toNumber() ?? 0,
         serviceCharge: aggregate._sum.serviceCharge?.toNumber() ?? 0,
+        totalServiceCharge: aggregate._sum.totalServiceCharge?.toNumber() ?? 0,
         distanceKm: aggregate._sum.distanceKm?.toNumber() ?? 0,
         passengers: aggregate._sum.passengers ?? 0,
       },

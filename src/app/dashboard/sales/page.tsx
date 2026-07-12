@@ -4,8 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   TrendingUp, RefreshCw, Check, AlertCircle, History,
   MapPin, User, Truck, ChevronLeft, ChevronRight, Loader2,
+  Route as RouteIcon, Users as UsersIcon, Gauge, Wallet, Coins, X,
 } from "lucide-react";
-import { dateToEthiopian, formatEthiopianDate } from "@/lib/ethiopian-calendar";
+import {
+  ETHIOPIAN_MONTH_NAMES, dateToEthiopian, ethiopianToGregorian,
+  formatEthiopianDate, gregorianToEthiopian, isEthiopianLeap,
+} from "@/lib/ethiopian-calendar";
 
 // ─── Types matching the sales API ──────────────────────────────────────────────
 
@@ -18,6 +22,7 @@ type SalesTrip = {
   distanceKm: number;
   tariff: number;
   serviceCharge: number;
+  totalServiceCharge: number;
   passengers: number;
   level: string;
   departureTerminalName: string;
@@ -25,6 +30,8 @@ type SalesTrip = {
   employee: { id: string; name: string | null; email: string | null } | null;
   vehicle: { id: string; plateNo: string | null; plateCode: string | null; fleetCategory: string | null } | null;
 };
+
+type SalesTotals = { tariff: number; serviceCharge: number; totalServiceCharge: number; distanceKm: number; passengers: number };
 
 type SalesSyncLog = {
   id: string;
@@ -46,6 +53,26 @@ type SalesSyncLog = {
   finishedAt: string | null;
 };
 
+type FilterOptions = {
+  departureTerminals: string[];
+  arrivalTerminals: string[];
+  employees: { id: string; name: string }[];
+};
+
+type SyncProgressEvent =
+  | { type: "probe-start" }
+  | { type: "probe-result"; sourceTotal: number; ourTotal: number }
+  | { type: "pass-start"; pass: number; maxPasses: number }
+  | { type: "page"; pass: number; page: number; pages: number; rowsSoFar: number }
+  | { type: "pass-done"; pass: number; rowsFetched: number; rowsCreated: number; rowsUpdated: number }
+  | { type: "skipped"; reason: string }
+  | { type: "rate-limited"; retryAfterSeconds: number };
+
+type SyncApiResult = {
+  status: SyncStatus; passes: number; rowsFetched: number; rowsCreated: number; rowsUpdated: number;
+  pagesFetched: number; sourceTotal: number | null; ourTotal: number | null; errorMessage: string | null;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -58,6 +85,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+// Fraction-of-a-second precision — the source can log several trips within
+// the same second, so plain minute/second display isn't enough to tell them
+// apart at a glance.
+function fmtDateTimeMs(iso: string) {
+  const d = new Date(iso);
+  const datePart = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `${datePart}, ${h}:${m}:${s}.${ms}`;
+}
 function fmtMoney(n: number) {
   return n.toLocaleString("en-ET", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -69,10 +108,37 @@ function statusStyle(s: SyncStatus): { bg: string; fg: string } {
   return { bg: "#fee2e2", fg: "#dc2626" };
 }
 
+function progressLine(e: SyncProgressEvent): string {
+  switch (e.type) {
+    case "probe-start": return "Checking how many trips exist on the source…";
+    case "probe-result": {
+      const diff = e.sourceTotal - e.ourTotal;
+      return diff <= 0
+        ? `Source has ${e.sourceTotal.toLocaleString()} trips — already fully on file.`
+        : `Source has ${e.sourceTotal.toLocaleString()} trips, we have ${e.ourTotal.toLocaleString()} — ${diff.toLocaleString()} to fetch.`;
+    }
+    case "pass-start": return `Pass ${e.pass}/${e.maxPasses}: walking the full table…`;
+    case "page": return `Pass ${e.pass}: page ${e.page}/${e.pages} — ${e.rowsSoFar.toLocaleString()} rows fetched so far`;
+    case "pass-done": return `Pass ${e.pass} done — ${e.rowsCreated.toLocaleString()} new, ${e.rowsUpdated.toLocaleString()} already known`;
+    case "skipped": return e.reason;
+    case "rate-limited": return `Rate limited by the source — cooling down for about ${Math.round(e.retryAfterSeconds / 60)} min.`;
+  }
+}
+
 const iCss: React.CSSProperties = {
   height: 38, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 9,
   background: "var(--surface)", color: "var(--foreground)", fontSize: 13, outline: "none",
 };
+const selCss: React.CSSProperties = { ...iCss, cursor: "pointer" };
+
+function Field({ label, children, span }: { label: string; children: React.ReactNode; span?: number }) {
+  return (
+    <div style={{ gridColumn: span ? `span ${span}` : undefined }}>
+      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</label>
+      {children}
+    </div>
+  );
+}
 
 function Badge({ label, bg, fg }: { label: string; bg: string; fg: string }) {
   return <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: bg, color: fg }}>{label}</span>;
@@ -81,8 +147,56 @@ function Badge({ label, bg, fg }: { label: string; bg: string; fg: string }) {
 function Toast({ message, onDone }: { message: string; onDone: () => void }) {
   useState(() => { const t = setTimeout(onDone, 3200); return () => clearTimeout(t); });
   return (
-    <div style={{ position: "fixed", bottom: 28, right: 28, zIndex: 9999, background: "#0f172a", color: "#fff", padding: "12px 20px", borderRadius: 12, fontSize: 14, fontWeight: 500, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 8px 30px rgb(0 0 0 / 0.18)" }}>
-      <Check size={15} strokeWidth={2.5} color="#4ade80" />{message}
+    <div style={{ position: "fixed", bottom: 28, right: 28, zIndex: 9999, background: "#0f172a", color: "#fff", padding: "12px 20px", borderRadius: 12, fontSize: 14, fontWeight: 500, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 8px 30px rgb(0 0 0 / 0.18)", maxWidth: 420 }}>
+      <Check size={15} strokeWidth={2.5} color="#4ade80" style={{ flexShrink: 0 }} />{message}
+    </div>
+  );
+}
+
+// ─── Ethiopian date input (day/month/year) — mirrors a Gregorian ISO value ────
+
+function daysInEthiopianMonth(month: number, year: number): number {
+  if (month < 13) return 30;
+  return isEthiopianLeap(year) ? 6 : 5;
+}
+
+function EthiopianDateInput({ value, onChange }: { value: string; onChange: (isoDate: string) => void }) {
+  const eth = (() => {
+    if (!value) return null;
+    const [y, m, d] = value.split("-").map(Number);
+    if (!y || !m || !d) return null;
+    return gregorianToEthiopian(y, m, d);
+  })();
+
+  function set(year: number | null, month: number | null, day: number | null) {
+    const y = year ?? eth?.year ?? null;
+    const m = month ?? eth?.month ?? null;
+    const d = day ?? eth?.day ?? null;
+    if (y && m && d) {
+      const g = ethiopianToGregorian(y, m, d);
+      onChange(`${g.year}-${String(g.month).padStart(2, "0")}-${String(g.day).padStart(2, "0")}`);
+    }
+  }
+
+  const maxDay = eth ? daysInEthiopianMonth(eth.month, eth.year) : 30;
+
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      <input type="number" placeholder="Day" min={1} max={maxDay} value={eth?.day ?? ""}
+        onChange={e => set(null, null, e.target.value ? Number(e.target.value) : null)}
+        style={{ ...iCss, width: 54, padding: "0 6px", textAlign: "center" }} />
+      <select value={eth?.month ?? ""} onChange={e => set(null, e.target.value ? Number(e.target.value) : null, null)} style={{ ...selCss, width: 108, padding: "0 6px" }}>
+        <option value="">Month</option>
+        {ETHIOPIAN_MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+      </select>
+      <input type="number" placeholder="Year" value={eth?.year ?? ""}
+        onChange={e => set(e.target.value ? Number(e.target.value) : null, null, null)}
+        style={{ ...iCss, width: 70, padding: "0 6px", textAlign: "center" }} />
+      {value && (
+        <button onClick={() => onChange("")} title="Clear" style={{ width: 28, height: 28, borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--surface)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-foreground)", flexShrink: 0 }}>
+          <X size={12} />
+        </button>
+      )}
     </div>
   );
 }
@@ -90,19 +204,28 @@ function Toast({ message, onDone }: { message: string; onDone: () => void }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50;
+const EMPTY_TOTALS: SalesTotals = { tariff: 0, serviceCharge: 0, totalServiceCharge: 0, distanceKm: 0, passengers: 0 };
 
 export default function SalesPage() {
   const [trips, setTrips] = useState<SalesTrip[]>([]);
   const [total, setTotal] = useState(0);
-  const [totals, setTotals] = useState({ tariff: 0, serviceCharge: 0, distanceKm: 0, passengers: 0 });
+  const [totals, setTotals] = useState<SalesTotals>(EMPTY_TOTALS);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [departureTerminal, setDepartureTerminal] = useState("");
+  const [arrivalTerminal, setArrivalTerminal] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [plateNo, setPlateNo] = useState("");
   const [search, setSearch] = useState("");
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ departureTerminals: [], arrivalTerminals: [], employees: [] });
 
   const [syncing, setSyncing] = useState(false);
+  const [syncStatusLine, setSyncStatusLine] = useState<string | null>(null);
+  const [syncLog, setSyncLog] = useState<string[]>([]);
+  const [syncProgressFrac, setSyncProgressFrac] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,8 +238,12 @@ export default function SalesPage() {
       const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
+      if (departureTerminal) params.set("departureTerminal", departureTerminal);
+      if (arrivalTerminal) params.set("arrivalTerminal", arrivalTerminal);
+      if (employeeId) params.set("employeeId", employeeId);
+      if (plateNo) params.set("plateNo", plateNo);
       if (search) params.set("search", search);
-      const res = await apiFetch<{ data: SalesTrip[]; meta: { total: number }; totals: typeof totals }>(`/api/sales/trips?${params.toString()}`);
+      const res = await apiFetch<{ data: SalesTrip[]; meta: { total: number }; totals: SalesTotals }>(`/api/sales/trips?${params.toString()}`);
       setTrips(res.data);
       setTotal(res.meta.total);
       setTotals(res.totals);
@@ -126,7 +253,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [offset, dateFrom, dateTo, search]);
+  }, [offset, dateFrom, dateTo, departureTerminal, arrivalTerminal, employeeId, plateNo, search]);
 
   const loadLogs = useCallback(async () => {
     try {
@@ -137,40 +264,106 @@ export default function SalesPage() {
     }
   }, []);
 
+  const loadFilterOptions = useCallback(async () => {
+    try {
+      const res = await apiFetch<FilterOptions>("/api/sales/filter-options");
+      setFilterOptions(res);
+    } catch {
+      // dropdowns just stay empty — the free-text search still works
+    }
+  }, []);
+
   useEffect(() => { loadTrips(); }, [loadTrips]);
   useEffect(() => { loadLogs(); }, [loadLogs]);
+  useEffect(() => { loadFilterOptions(); }, [loadFilterOptions]);
+
+  function applyProgressEvent(e: SyncProgressEvent) {
+    setSyncStatusLine(progressLine(e));
+    setSyncLog(prev => [...prev.slice(-7), progressLine(e)]);
+    if (e.type === "page") setSyncProgressFrac(e.pages > 0 ? e.page / e.pages : null);
+    if (e.type === "pass-done" || e.type === "probe-start") setSyncProgressFrac(null);
+  }
 
   async function handleSync() {
     setSyncing(true);
+    setSyncLog([]);
+    setSyncProgressFrac(null);
+    setSyncStatusLine("Starting sync…");
     try {
-      const res = await apiFetch<{ status: SyncStatus; passes: number; rowsFetched: number; rowsCreated: number; rowsUpdated: number; pagesFetched: number; sourceTotal: number | null; ourTotal: number | null; errorMessage: string | null }>("/api/sales/sync", { method: "POST" });
-      if (res.status === "RATE_LIMITED") {
-        setToast(`Rate limited by the source — will retry automatically once the cooldown passes.`);
-      } else if (res.status === "SKIPPED" && res.errorMessage) {
-        setToast(res.errorMessage);
-      } else if (res.status === "SKIPPED") {
-        setToast(`Already up to date — ${res.ourTotal?.toLocaleString() ?? "?"} trips, nothing new on the source.`);
-      } else {
-        const gap = res.sourceTotal !== null && res.ourTotal !== null ? res.sourceTotal - res.ourTotal : null;
-        setToast(
-          `Synced: ${res.rowsCreated} new, ${res.rowsUpdated} already known (${res.passes} pass${res.passes === 1 ? "" : "es"}, ${res.pagesFetched} page${res.pagesFetched === 1 ? "" : "s"})` +
-          (gap !== null ? gap === 0 ? " — fully caught up" : ` — still ${gap} behind the source, will retry next sync` : "")
-        );
+      const res = await fetch("/api/sales/sync?stream=1", { method: "POST" });
+      if (!res.ok || !res.body) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message ?? `Sync failed (HTTP ${res.status}).`);
       }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: SyncApiResult | null = null;
+      let streamError: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+          const payload = JSON.parse(line.slice(5).trim()) as
+            | { kind: "progress"; event: SyncProgressEvent }
+            | { kind: "done"; result: SyncApiResult }
+            | { kind: "error"; message: string };
+          if (payload.kind === "progress") applyProgressEvent(payload.event);
+          else if (payload.kind === "done") finalResult = payload.result;
+          else if (payload.kind === "error") streamError = payload.message;
+        }
+      }
+
+      if (streamError) throw new Error(streamError);
+
+      if (finalResult) {
+        const res2 = finalResult;
+        if (res2.status === "RATE_LIMITED") {
+          setToast("Rate limited by the source — will retry automatically once the cooldown passes.");
+        } else if (res2.status === "SKIPPED" && res2.errorMessage) {
+          setToast(res2.errorMessage);
+        } else if (res2.status === "SKIPPED") {
+          setToast(`Already up to date — ${res2.ourTotal?.toLocaleString() ?? "?"} trips, nothing new on the source.`);
+        } else {
+          const gap = res2.sourceTotal !== null && res2.ourTotal !== null ? res2.sourceTotal - res2.ourTotal : null;
+          setToast(
+            `Synced: ${res2.rowsCreated} new, ${res2.rowsUpdated} already known (${res2.passes} pass${res2.passes === 1 ? "" : "es"}, ${res2.pagesFetched} page${res2.pagesFetched === 1 ? "" : "s"})` +
+            (gap !== null ? gap === 0 ? " — fully caught up" : ` — still ${gap} behind the source, will retry next sync` : "")
+          );
+        }
+      }
+
       setOffset(0);
       await Promise.all([loadTrips(), loadLogs()]);
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Sync failed");
     } finally {
       setSyncing(false);
+      setSyncStatusLine(null);
+      setSyncProgressFrac(null);
     }
   }
+
+  function clearFilters() {
+    setDateFrom(""); setDateTo(""); setDepartureTerminal(""); setArrivalTerminal("");
+    setEmployeeId(""); setPlateNo(""); setSearch(""); setOffset(0);
+  }
+  const filtersActive = !!(dateFrom || dateTo || departureTerminal || arrivalTerminal || employeeId || plateNo || search);
 
   const latestLog = logs[0] ?? null;
   const completenessGap = latestLog?.sourceTotal != null && latestLog?.ourTotal != null ? latestLog.sourceTotal - latestLog.ourTotal : null;
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const totalCollected = totals.tariff + totals.totalServiceCharge;
 
   return (
     <>
@@ -180,14 +373,17 @@ export default function SalesPage() {
       <div style={{ minHeight: "100vh", background: "var(--background)", padding: "24px 28px" }}>
 
         {/* Top bar */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
           <div>
             <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>Sales</h1>
             <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "3px 0 0" }}>
               Mirrored from the OTA ticketing system · {total.toLocaleString()} trips on file
             </p>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {syncing && syncStatusLine && (
+              <span style={{ fontSize: 12, color: "var(--muted-foreground)", maxWidth: 320, textAlign: "right" }}>{syncStatusLine}</span>
+            )}
             <button onClick={() => setShowHistory(s => !s)} style={{ height: 40, padding: "0 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, color: "var(--foreground)" }}>
               <History size={15} /> Sync history
             </button>
@@ -198,8 +394,28 @@ export default function SalesPage() {
           </div>
         </div>
 
+        {/* Live sync progress panel */}
+        {syncing && (
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: syncProgressFrac !== null ? 8 : 0 }}>
+              <Loader2 size={14} style={{ animation: "spin 1s linear infinite", color: "var(--primary)", flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>{syncStatusLine}</span>
+            </div>
+            {syncProgressFrac !== null && (
+              <div style={{ height: 6, background: "var(--background)", borderRadius: 999, overflow: "hidden", marginBottom: 8 }}>
+                <div style={{ height: "100%", width: `${Math.round(syncProgressFrac * 100)}%`, background: "var(--primary)", transition: "width 0.15s linear" }} />
+              </div>
+            )}
+            {syncLog.length > 1 && (
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", lineHeight: 1.8 }}>
+                {syncLog.slice(0, -1).map((line, i) => <div key={i}>{line}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Completeness banner — driven by the most recent sync's own count comparison */}
-        {latestLog && completenessGap !== null && (
+        {latestLog && completenessGap !== null && !syncing && (
           <div style={{
             display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, marginBottom: 14,
             background: completenessGap === 0 ? "#dcfce7" : "#fef3c7",
@@ -243,26 +459,74 @@ export default function SalesPage() {
           </div>
         )}
 
-        {/* Summary chips (for the current filtered view) */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
+        {/* Grand totals — finance/management summary for the current filtered view */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 18 }}>
           {[
-            { label: "Trips", value: total.toLocaleString() },
-            { label: "Tariff total", value: `${fmtMoney(totals.tariff)} ETB` },
-            { label: "Service charge total", value: `${fmtMoney(totals.serviceCharge)} ETB` },
-            { label: "Passengers", value: totals.passengers.toLocaleString() },
+            { label: "Trips", value: total.toLocaleString(), icon: <RouteIcon size={14} /> },
+            { label: "Distance", value: `${fmtMoney(totals.distanceKm)} km`, icon: <Gauge size={14} /> },
+            { label: "Passengers", value: totals.passengers.toLocaleString(), icon: <UsersIcon size={14} /> },
+            { label: "Tariff revenue", value: `${fmtMoney(totals.tariff)} ETB`, icon: <Wallet size={14} /> },
+            { label: "Service charge collected", value: `${fmtMoney(totals.totalServiceCharge)} ETB`, icon: <Coins size={14} /> },
+            { label: "Total collected", value: `${fmtMoney(totalCollected)} ETB`, icon: <Wallet size={14} />, accent: true },
           ].map(s => (
-            <div key={s.label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
-              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}>{s.label}</div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: "var(--foreground)" }}>{s.value}</div>
+            <div key={s.label} style={{ background: s.accent ? "color-mix(in srgb, var(--primary) 8%, var(--surface))" : "var(--surface)", border: `1px solid ${s.accent ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "var(--border)"}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}>{s.icon} {s.label}</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: s.accent ? "var(--primary)" : "var(--foreground)" }}>{s.value}</div>
             </div>
           ))}
         </div>
 
-        {/* Filters — intentionally basic for now, better filtering is a follow-up */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 10, marginBottom: 14 }}>
-          <input type="date" style={iCss} value={dateFrom} onChange={e => { setDateFrom(e.target.value); setOffset(0); }} title="From date" />
-          <input type="date" style={iCss} value={dateTo} onChange={e => { setDateTo(e.target.value); setOffset(0); }} title="To date" />
-          <input placeholder="Search employee, terminal, plate…" style={iCss} value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} />
+        {/* Filters */}
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", margin: 0 }}>Filters</p>
+            {filtersActive && (
+              <button onClick={clearFilters} style={{ fontSize: 12, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Clear all</button>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
+            <Field label="Departure station">
+              <select style={selCss} value={departureTerminal} onChange={e => { setDepartureTerminal(e.target.value); setOffset(0); }}>
+                <option value="">All stations</option>
+                {filterOptions.departureTerminals.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+            <Field label="Arrival station (route)">
+              <select style={selCss} value={arrivalTerminal} onChange={e => { setArrivalTerminal(e.target.value); setOffset(0); }}>
+                <option value="">All destinations</option>
+                {filterOptions.arrivalTerminals.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+            <Field label="Ticketer">
+              <select style={selCss} value={employeeId} onChange={e => { setEmployeeId(e.target.value); setOffset(0); }}>
+                <option value="">All ticketers</option>
+                {filterOptions.employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Plate number">
+              <input placeholder="e.g. 87094" style={iCss} value={plateNo} onChange={e => { setPlateNo(e.target.value); setOffset(0); }} />
+            </Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <Field label="Date from — Gregorian">
+              <input type="date" style={iCss} value={dateFrom} onChange={e => { setDateFrom(e.target.value); setOffset(0); }} />
+            </Field>
+            <Field label="Date to — Gregorian">
+              <input type="date" style={iCss} value={dateTo} onChange={e => { setDateTo(e.target.value); setOffset(0); }} />
+            </Field>
+            <Field label="Date from — Ethiopian (E.C.)">
+              <EthiopianDateInput value={dateFrom} onChange={v => { setDateFrom(v); setOffset(0); }} />
+            </Field>
+            <Field label="Date to — Ethiopian (E.C.)">
+              <EthiopianDateInput value={dateTo} onChange={v => { setDateTo(v); setOffset(0); }} />
+            </Field>
+          </div>
+
+          <Field label="Search (employee, station, plate)">
+            <input placeholder="Free-text search across employee, station and plate…" style={iCss} value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} />
+          </Field>
         </div>
 
         {error && (
@@ -278,8 +542,8 @@ export default function SalesPage() {
         ) : trips.length === 0 ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "60px 0", color: "var(--muted-foreground)" }}>
             <TrendingUp size={36} style={{ marginBottom: 12, opacity: 0.25 }} />
-            <p style={{ fontSize: 14 }}>No trips on file yet.</p>
-            <p style={{ fontSize: 12, marginTop: 4 }}>Click &ldquo;Sync now&rdquo; to pull data from the OTA system.</p>
+            <p style={{ fontSize: 14 }}>No trips match these filters.</p>
+            <p style={{ fontSize: 12, marginTop: 4 }}>{total === 0 ? <>Click &ldquo;Sync now&rdquo; to pull data from the OTA system.</> : <>Try clearing a filter.</>}</p>
           </div>
         ) : (
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
@@ -287,7 +551,7 @@ export default function SalesPage() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
-                    {["Date", "Route", "Employee", "Vehicle", "Level", "Distance", "Tariff", "Service chg.", "Pax"].map(h => (
+                    {["Date & time (newest first)", "Route", "Ticketer", "Vehicle", "Level", "Distance", "Tariff", "Service charge", "Pax"].map(h => (
                       <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -295,9 +559,9 @@ export default function SalesPage() {
                 <tbody>
                   {trips.map(t => (
                     <tr key={t.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td style={{ padding: "10px 14px", whiteSpace: "nowrap", color: "var(--foreground)" }}>
-                        {fmtDateTime(t.date)}
-                        <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{formatEthiopianDate(dateToEthiopian(new Date(t.date)))} E.C.</div>
+                      <td style={{ padding: "10px 14px", whiteSpace: "nowrap", color: "var(--foreground)", fontFamily: "monospace", fontSize: 12 }}>
+                        {fmtDateTimeMs(t.date)}
+                        <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontFamily: "inherit" }}>{formatEthiopianDate(dateToEthiopian(new Date(t.date)))} E.C.</div>
                       </td>
                       <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -320,7 +584,10 @@ export default function SalesPage() {
                       <td style={{ padding: "10px 14px", color: "var(--muted-foreground)" }}>{t.level}</td>
                       <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(t.distanceKm)} km</td>
                       <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace", fontWeight: 600 }}>{fmtMoney(t.tariff)}</td>
-                      <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", fontFamily: "monospace" }}>{fmtMoney(t.serviceCharge)}</td>
+                      <td style={{ padding: "10px 14px", fontFamily: "monospace" }}>
+                        <div style={{ color: "var(--muted-foreground)", fontSize: 11 }}>{fmtMoney(t.serviceCharge)}/pax</div>
+                        <div style={{ color: "var(--foreground)", fontWeight: 700 }}>{fmtMoney(t.totalServiceCharge)}</div>
+                      </td>
                       <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{t.passengers}</td>
                     </tr>
                   ))}

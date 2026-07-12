@@ -353,7 +353,10 @@ export function serializeSalesTrip(t: SalesTrip) {
     date: t.date,
     distanceKm: toNumber(t.distanceKm),
     tariff: toNumber(t.tariff),
+    // serviceCharge is the source's per-passenger rate; totalServiceCharge
+    // (= serviceCharge x passengers) is what was actually collected.
     serviceCharge: toNumber(t.serviceCharge),
+    totalServiceCharge: toNumber(t.totalServiceCharge),
     passengers: t.passengers,
     level: t.level,
     companyId: t.companyId,

@@ -39,7 +39,9 @@ const STALE_RUN_MS = 30 * 60 * 1000;
 // full convergence happens gradually across successive cron runs instead
 // of forcing it inside one.
 const MAX_PASSES = 2;
-const MAX_LOOP_MS = 6 * 60 * 1000;
+// Kept under Vercel's function duration limit (300s on most plans) with
+// headroom for login/probe/DB overhead beyond the page-fetch loop itself.
+const MAX_LOOP_MS = 4 * 60 * 1000;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -56,12 +58,17 @@ function toInt(value: string | undefined | null): number {
 }
 
 function mapTripData(t: OtaTrip) {
+  const serviceCharge = toDecimal(t.trip_Service_Charge);
+  const passengers = toInt(t.Passengers);
   return {
     date: new Date(t.Date),
     distanceKm: toDecimal(t.trip_Distance),
     tariff: toDecimal(t.trip_tarif),
-    serviceCharge: toDecimal(t.trip_Service_Charge),
-    passengers: toInt(t.Passengers),
+    // The source reports this as a per-passenger rate — the amount actually
+    // collected on the trip is that rate times how many passengers rode.
+    serviceCharge,
+    totalServiceCharge: serviceCharge.mul(passengers),
+    passengers,
     level: t.Level ?? "",
     companyId: t.company_id ?? "",
     companyName: t.company_name ?? "",
@@ -79,14 +86,29 @@ function mapTripData(t: OtaTrip) {
   };
 }
 
+// Fired as a sync run progresses, so a caller (the API route, for a live
+// "Sync now" click) can show something more useful than a spinner.
+export type SyncProgressEvent =
+  | { type: "probe-start" }
+  | { type: "probe-result"; sourceTotal: number; ourTotal: number }
+  | { type: "pass-start"; pass: number; maxPasses: number }
+  | { type: "page"; pass: number; page: number; pages: number; rowsSoFar: number }
+  | { type: "pass-done"; pass: number; rowsFetched: number; rowsCreated: number; rowsUpdated: number }
+  | { type: "skipped"; reason: string }
+  | { type: "rate-limited"; retryAfterSeconds: number };
+
 // One walk of every page, deduped against what's already on file, written
 // in bulk. Returns what this single pass accomplished. Lets OtaRateLimitError
 // propagate — the caller decides what to do about it.
 async function performOneWalk(
   config: ReturnType<typeof otaConfigFromEnv>,
-  logId: string
+  logId: string,
+  pass: number,
+  onProgress?: (event: SyncProgressEvent) => void
 ): Promise<{ rowsFetched: number; pagesFetched: number; rowsCreated: number; rowsUpdated: number }> {
-  const fetched = await fetchAllOtaTrips(config, {});
+  const fetched = await fetchAllOtaTrips(config, {
+    onPage: (page, pages, rowsSoFar) => onProgress?.({ type: "page", pass, page, pages, rowsSoFar }),
+  });
 
   // The same trip can land on two different pages of one walk while the
   // source table is being written to mid-walk — dedupe before touching
@@ -118,12 +140,15 @@ async function performOneWalk(
     rowsCreated += result.count;
   }
 
-  return { rowsFetched: fetched.rows.length, pagesFetched: fetched.pagesFetched, rowsCreated, rowsUpdated };
+  const result = { rowsFetched: fetched.rows.length, pagesFetched: fetched.pagesFetched, rowsCreated, rowsUpdated };
+  onProgress?.({ type: "pass-done", pass, ...result });
+  return result;
 }
 
 export type RunSyncOptions = {
   source: "MANUAL" | "AUTO";
   triggeredBy?: string | null;
+  onProgress?: (event: SyncProgressEvent) => void;
 };
 
 export type SyncResult = {
@@ -184,10 +209,9 @@ export async function runSalesSync(options: RunSyncOptions): Promise<SyncResult>
     orderBy: { startedAt: "desc" },
   });
   if (inProgress) {
-    return skippedResult(
-      options, startedAt, latest?.date ?? null, ourTotalBefore, "SKIPPED",
-      `Sync ${inProgress.id} was already in progress (started ${inProgress.startedAt.toISOString()}).`
-    );
+    const reason = `Sync ${inProgress.id} was already in progress (started ${inProgress.startedAt.toISOString()}).`;
+    options.onProgress?.({ type: "skipped", reason });
+    return skippedResult(options, startedAt, latest?.date ?? null, ourTotalBefore, "SKIPPED", reason);
   }
 
   const lastRateLimited = await prisma.salesSyncLog.findFirst({
@@ -195,10 +219,9 @@ export async function runSalesSync(options: RunSyncOptions): Promise<SyncResult>
     orderBy: { startedAt: "desc" },
   });
   if (lastRateLimited?.rateLimitedUntil) {
-    return skippedResult(
-      options, startedAt, latest?.date ?? null, ourTotalBefore, "SKIPPED",
-      `Still cooling down from a rate limit until ${lastRateLimited.rateLimitedUntil.toISOString()}.`
-    );
+    const reason = `Still cooling down from a rate limit until ${lastRateLimited.rateLimitedUntil.toISOString()}.`;
+    options.onProgress?.({ type: "skipped", reason });
+    return skippedResult(options, startedAt, latest?.date ?? null, ourTotalBefore, "SKIPPED", reason);
   }
 
   const log = await prisma.salesSyncLog.create({
@@ -226,17 +249,21 @@ export async function runSalesSync(options: RunSyncOptions): Promise<SyncResult>
 
     // Cheap unfiltered probe — one request, just to read the source's own
     // row count before committing to a full walk.
+    options.onProgress?.({ type: "probe-start" });
     const { token } = await otaLogin(config);
     const probe = await fetchOtaTripsPage(config, token, 1, 1);
     sourceTotal = probe.total;
+    options.onProgress?.({ type: "probe-result", sourceTotal, ourTotal: ourTotalBefore });
 
     if (sourceTotal === ourTotalBefore) {
       status = "SKIPPED";
+      options.onProgress?.({ type: "skipped", reason: "Already up to date — the source's row count hasn't moved." });
     } else {
       const loopStart = Date.now();
       while (passes < MAX_PASSES && Date.now() - loopStart < MAX_LOOP_MS) {
         passes++;
-        const pass = await performOneWalk(config, log.id);
+        options.onProgress?.({ type: "pass-start", pass: passes, maxPasses: MAX_PASSES });
+        const pass = await performOneWalk(config, log.id, passes, options.onProgress);
         pagesFetched += pass.pagesFetched;
         rowsFetched += pass.rowsFetched;
         rowsCreated += pass.rowsCreated;
@@ -262,6 +289,7 @@ export async function runSalesSync(options: RunSyncOptions): Promise<SyncResult>
       const bufferSeconds = 5 * 60;
       rateLimitedUntil = new Date(Date.now() + (error.retryAfterSeconds + bufferSeconds) * 1000);
       errorMessage = error.message;
+      options.onProgress?.({ type: "rate-limited", retryAfterSeconds: error.retryAfterSeconds });
     } else {
       status = rowsCreated > 0 || rowsUpdated > 0 ? "PARTIAL" : "FAILED";
       errorMessage = error instanceof Error ? error.message : String(error);
