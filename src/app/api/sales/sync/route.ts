@@ -1,0 +1,66 @@
+// src/app/api/sales/sync/route.ts
+import { NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requirePermission } from "@/lib/api-auth";
+import { ok, parsePagination, serializeSalesSyncLog, serverError, unauthorized } from "@/lib/api-utils";
+import { runSalesSync } from "@/lib/ota/sync";
+
+/**
+ * POST /api/sales/sync
+ * Triggers a sync from the OTA source system. Two ways in:
+ *  - An authenticated admin session with sales edit access -> logged as MANUAL.
+ *  - The `x-sync-token` header matching SALES_SYNC_TOKEN -> logged as AUTO,
+ *    so an external cron trigger can call this without a browser session.
+ */
+export async function POST(request: NextRequest) {
+  const tokenHeader = request.headers.get("x-sync-token");
+  const expectedToken = process.env.SALES_SYNC_TOKEN;
+
+  if (tokenHeader) {
+    if (!expectedToken || tokenHeader !== expectedToken) {
+      return unauthorized("Invalid sync token.");
+    }
+    try {
+      const result = await runSalesSync({ source: "AUTO" });
+      return ok(result);
+    } catch (error) {
+      return serverError(error);
+    }
+  }
+
+  const auth = await requirePermission(request, "sales", "edit");
+  if ("error" in auth) return auth.error;
+
+  try {
+    const result = await runSalesSync({ source: "MANUAL", triggeredBy: auth.session.adminUserId });
+    return ok(result);
+  } catch (error) {
+    return serverError(error);
+  }
+}
+
+/**
+ * GET /api/sales/sync
+ * Lists past sync runs, newest first.
+ */
+export async function GET(request: NextRequest) {
+  const auth = await requirePermission(request, "sales", "view");
+  if ("error" in auth) return auth.error;
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const { offset, limit } = parsePagination(searchParams, 20, 100);
+
+    const [logs, total] = await Promise.all([
+      prisma.salesSyncLog.findMany({ orderBy: { startedAt: "desc" }, skip: offset, take: limit }),
+      prisma.salesSyncLog.count(),
+    ]);
+
+    return ok({
+      data: logs.map(serializeSalesSyncLog),
+      meta: { total, offset, limit, hasMore: offset + logs.length < total },
+    });
+  } catch (error) {
+    return serverError(error);
+  }
+}

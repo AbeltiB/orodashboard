@@ -545,3 +545,90 @@ model Session {
   @@index([expiresAt])
   @@map("sessions")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SALES  (mirrored from the external OTA ticketing system — see
+// src/lib/ota/*. OroDashboard doesn't originate this data, it periodically
+// pulls and mirrors it so it can be viewed/filtered here instead of the
+// source system's own dashboard.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SyncSource {
+  MANUAL
+  AUTO
+}
+
+enum SyncStatus {
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+model SalesTrip {
+  // OTA's own trip id — used directly as our primary key so upserts are a
+  // natural dedupe, no separate surrogate key needed.
+  id                     String   @id
+  date                   DateTime
+  distanceKm             Decimal  @db.Decimal(10, 2)
+  tariff                 Decimal  @db.Decimal(10, 2)
+  serviceCharge          Decimal  @db.Decimal(10, 2)
+  passengers             Int
+  level                  String
+
+  companyId              String
+  companyName            String
+
+  departureTerminalName  String
+  arrivalTerminalName    String
+
+  employeeExternalId     String?
+  employeeName           String?
+  employeeEmail          String?
+
+  vehicleExternalId      String?
+  vehiclePlateNo         String?
+  vehiclePlateCode       String?
+  vehicleFleetCategory   String?
+  vehicleAssociation     String?
+  vehicleLevel           String?
+
+  lastSyncId             String?
+  lastSync               SalesSyncLog? @relation(fields: [lastSyncId], references: [id])
+
+  firstSeenAt            DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([date])
+  @@index([departureTerminalName])
+  @@index([arrivalTerminalName])
+  @@index([employeeExternalId])
+  @@index([vehicleExternalId])
+  @@index([lastSyncId])
+  @@map("sales_trips")
+}
+
+model SalesSyncLog {
+  id            String     @id @default(cuid())
+
+  source        SyncSource
+  triggeredBy   String?    // AdminUser id when source = MANUAL, null for AUTO
+
+  windowFrom    DateTime?  // null = full backfill (no lower bound)
+  windowTo      DateTime
+
+  status        SyncStatus @default(SUCCESS)
+  pagesFetched  Int        @default(0)
+  rowsFetched   Int        @default(0)
+  rowsCreated   Int        @default(0)
+  rowsUpdated   Int        @default(0)
+  errorMessage  String?
+
+  startedAt     DateTime   @default(now())
+  finishedAt    DateTime?
+
+  trips         SalesTrip[]
+
+  @@index([source])
+  @@index([startedAt])
+  @@map("sales_sync_logs")
+}

@@ -10,6 +10,7 @@ export const PERMISSION_PAGES = [
   { page: "employees", label: "Employees" },
   { page: "pos-machines", label: "POS Machines" },
   { page: "shifts", label: "Shift Schedule" },
+  { page: "sales", label: "Sales" },
   { page: "fare-matrix", label: "Fare Price Matrix" },
   { page: "reports", label: "Reports" },
   { page: "settings", label: "Settings" },

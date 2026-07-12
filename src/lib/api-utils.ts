@@ -1,5 +1,5 @@
 // src/lib/api-utils.ts
-import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone, type PosSession, type ShiftAssignment, type ShiftImportBatch } from "@/generated/prisma/client";
+import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone, type PosSession, type ShiftAssignment, type ShiftImportBatch, type SalesTrip, type SalesSyncLog } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,6 +340,60 @@ export function serializeShiftImportBatch(b: ShiftImportBatch) {
     errorCount: b.errorCount,
     errors: b.errors,
     createdAt: b.createdAt,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sales (mirrored from the external OTA source system)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function serializeSalesTrip(t: SalesTrip) {
+  return {
+    id: t.id,
+    date: t.date,
+    distanceKm: toNumber(t.distanceKm),
+    tariff: toNumber(t.tariff),
+    serviceCharge: toNumber(t.serviceCharge),
+    passengers: t.passengers,
+    level: t.level,
+    companyId: t.companyId,
+    companyName: t.companyName,
+    departureTerminalName: t.departureTerminalName,
+    arrivalTerminalName: t.arrivalTerminalName,
+    employee: t.employeeExternalId
+      ? { id: t.employeeExternalId, name: t.employeeName, email: t.employeeEmail }
+      : null,
+    vehicle: t.vehicleExternalId
+      ? {
+          id: t.vehicleExternalId,
+          plateNo: t.vehiclePlateNo,
+          plateCode: t.vehiclePlateCode,
+          fleetCategory: t.vehicleFleetCategory,
+          association: t.vehicleAssociation,
+          level: t.vehicleLevel,
+        }
+      : null,
+    lastSyncId: t.lastSyncId,
+    firstSeenAt: t.firstSeenAt,
+    updatedAt: t.updatedAt,
+  };
+}
+
+export function serializeSalesSyncLog(l: SalesSyncLog) {
+  return {
+    id: l.id,
+    source: l.source,
+    triggeredBy: l.triggeredBy,
+    windowFrom: l.windowFrom,
+    windowTo: l.windowTo,
+    status: l.status,
+    pagesFetched: l.pagesFetched,
+    rowsFetched: l.rowsFetched,
+    rowsCreated: l.rowsCreated,
+    rowsUpdated: l.rowsUpdated,
+    errorMessage: l.errorMessage,
+    startedAt: l.startedAt,
+    finishedAt: l.finishedAt,
   };
 }
 

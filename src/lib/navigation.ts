@@ -7,7 +7,8 @@ import {
   CalendarClock,
   FileBarChart,
   Settings,
-  DollarSign
+  DollarSign,
+  TrendingUp
 } from "lucide-react";
 
 export const navigation = [
@@ -44,6 +45,11 @@ export const navigation = [
     title: "Shifts",
     href: "/dashboard/shifts",
     icon: CalendarClock,
+  },
+  {
+    title: "Sales",
+    href: "/dashboard/sales",
+    icon: TrendingUp,
   },
   {
     title: "Fare Matrix",

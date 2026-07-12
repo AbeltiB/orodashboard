@@ -42,3 +42,7 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# OTA sales-data exports (real trip/sales data — never commit)
+ota_trips*.csv
+
