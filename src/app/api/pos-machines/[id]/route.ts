@@ -84,13 +84,19 @@ export async function PATCH(request: NextRequest, context: Context) {
       if (serialConflict) return conflict("Serial number is already used by another machine.");
     }
 
-    const { employeeId, stationId, ...rest } = parsed.data;
+    const { stationId, ...rest } = parsed.data;
+
+    // EXCLUSIVE machines route station relocation through /assign too, so it
+    // stays reflected in PosMachineHistory. SHARED machines have no per-person
+    // custody concept, so their station is just a location field.
+    if (stationId !== undefined && existing.assignmentMode === "EXCLUSIVE") {
+      return badRequest("Use /assign to relocate an exclusively-assigned POS machine.");
+    }
 
     const machine = await prisma.posMachine.update({
       where: { id },
       data: {
         ...rest,
-        ...(employeeId !== undefined && { employeeId: employeeId ?? null }),
         ...(stationId !== undefined && { stationId: stationId ?? null }),
       },
       include: posInclude,

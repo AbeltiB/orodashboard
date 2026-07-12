@@ -1,5 +1,5 @@
 // src/lib/api-utils.ts
-import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone } from "@/generated/prisma/client";
+import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone, type PosSession } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -257,6 +257,7 @@ export function serializePosMachine(p: PosMachineWithRelations) {
     status: p.status,
     appVersion: p.appVersion,
     remark: p.remark,
+    assignmentMode: p.assignmentMode,
     stationId: p.stationId,
     station: p.station ?? null,
     employeeId: p.employeeId,
@@ -271,6 +272,26 @@ export function serializePosMachine(p: PosMachineWithRelations) {
     deletedAt: p.deletedAt,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
+  };
+}
+
+type PosSessionWithEmployee = PosSession & {
+  employee?: { id: string; code: string } | null;
+};
+
+export function serializePosSession(s: PosSessionWithEmployee) {
+  return {
+    id: s.id,
+    posMachineId: s.posMachineId,
+    employeeId: s.employeeId,
+    employeeCode: s.employee?.code ?? null,
+    employeeName: s.employeeName,
+    stationId: s.stationId,
+    stationName: s.stationName,
+    startedAt: s.startedAt,
+    endedAt: s.endedAt,
+    note: s.note,
+    loggedBy: s.loggedBy,
   };
 }
 

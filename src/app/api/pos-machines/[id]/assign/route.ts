@@ -32,6 +32,9 @@ export async function POST(request: NextRequest, context: Context) {
     const machine = await prisma.posMachine.findUnique({ where: { id } });
     if (!machine) return notFound("POS machine");
     if (machine.isDeleted) return badRequest("Cannot reassign a decommissioned machine.");
+    if (machine.assignmentMode !== "EXCLUSIVE") {
+      return badRequest("This machine is SHARED-mode — use /sessions instead of /assign.");
+    }
 
     const { employeeId, stationId, fromDate, remark } = parsed.data;
 

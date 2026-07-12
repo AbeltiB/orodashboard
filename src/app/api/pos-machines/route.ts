@@ -86,6 +86,10 @@ export async function POST(request: NextRequest) {
     });
     if (serialConflict) return conflict("A POS machine with this serial number already exists.");
 
+    if (parsed.data.assignmentMode === "SHARED" && parsed.data.employeeId) {
+      return badRequest("SHARED machines can't be assigned an employeeId directly — use /sessions once created.");
+    }
+
     const code = await generatePosCode();
     const { employeeId, stationId, ...rest } = parsed.data;
 
