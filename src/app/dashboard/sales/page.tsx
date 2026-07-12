@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   TrendingUp, RefreshCw, Check, AlertCircle, History,
-  MapPin, User, Truck, ChevronLeft, ChevronRight, Loader2,
-  Route as RouteIcon, Users as UsersIcon, Gauge, Wallet, Coins, X,
+  MapPin, User, Truck, ChevronLeft, ChevronRight, ChevronDown, Loader2,
+  Route as RouteIcon, Users as UsersIcon, Gauge, Wallet, Coins, X, Calendar,
 } from "lucide-react";
 import {
   ETHIOPIAN_MONTH_NAMES, dateToEthiopian, ethiopianToGregorian,
@@ -70,6 +70,24 @@ type TicketerRow = {
   totalCollected: number;
 };
 
+// One ticketer's trips grouped by calendar day x route in a single row —
+// the raw material the detail drill-down re-slices into "by route" and
+// "by date" views client-side, and expands per date into routes worked.
+type TicketerBreakdownRow = {
+  date: string; // yyyy-mm-dd
+  departureTerminalName: string;
+  arrivalTerminalName: string;
+  trips: number;
+  passengers: number;
+  distanceKm: number;
+  tariff: number;
+  totalServiceCharge: number;
+  totalCollected: number;
+};
+
+type RouteAggregate = { departure: string; arrival: string; trips: number; passengers: number; distanceKm: number; tariff: number; totalServiceCharge: number; totalCollected: number };
+type DateAggregate = { date: string; trips: number; passengers: number; distanceKm: number; tariff: number; totalServiceCharge: number; totalCollected: number };
+
 type SyncProgressEvent =
   | { type: "probe-start" }
   | { type: "probe-result"; sourceTotal: number; ourTotal: number }
@@ -110,6 +128,16 @@ function fmtDateTimeMs(iso: string) {
 }
 function fmtMoney(n: number) {
   return n.toLocaleString("en-ET", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// dateStr is a plain yyyy-mm-dd (day-truncated) — not an instant, so this
+// formats it directly rather than routing through local-timezone Date math.
+function fmtDay(dateStr: string) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+}
+function ethiopianDayLabel(dateStr: string) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  return `${formatEthiopianDate(dateToEthiopian(d))} E.C.`;
 }
 function statusStyle(s: SyncStatus): { bg: string; fg: string } {
   if (s === "SUCCESS") return { bg: "#dcfce7", fg: "#16a34a" };
@@ -247,6 +275,15 @@ export default function SalesPage() {
   const [byTicketer, setByTicketer] = useState<TicketerRow[]>([]);
   const [byTicketerLoading, setByTicketerLoading] = useState(false);
 
+  // Per-ticketer drill-down: which row is expanded, its raw day x route
+  // data, which sub-view (route totals vs. date totals) is showing, and
+  // which date (in the date sub-view) is further expanded into routes.
+  const [expandedTicketer, setExpandedTicketer] = useState<string | null>(null);
+  const [ticketerBreakdown, setTicketerBreakdown] = useState<TicketerBreakdownRow[]>([]);
+  const [ticketerBreakdownLoading, setTicketerBreakdownLoading] = useState(false);
+  const [ticketerDetailView, setTicketerDetailView] = useState<"route" | "date">("date");
+  const [expandedDate, setExpandedDate] = useState<string | null>(null);
+
   const buildFilterParams = useCallback(() => {
     const params = new URLSearchParams();
     if (dateFrom) params.set("dateFrom", dateFrom);
@@ -289,6 +326,50 @@ export default function SalesPage() {
       setByTicketerLoading(false);
     }
   }, [buildFilterParams]);
+
+  const loadTicketerBreakdown = useCallback(async (empId: string) => {
+    setTicketerBreakdownLoading(true);
+    try {
+      const res = await apiFetch<{ data: TicketerBreakdownRow[] }>(`/api/sales/by-ticketer/${empId}/breakdown?${buildFilterParams().toString()}`);
+      setTicketerBreakdown(res.data);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Failed to load ticketer breakdown.");
+    } finally {
+      setTicketerBreakdownLoading(false);
+    }
+  }, [buildFilterParams]);
+
+  useEffect(() => {
+    if (expandedTicketer) loadTicketerBreakdown(expandedTicketer);
+  }, [expandedTicketer, loadTicketerBreakdown]);
+
+  function toggleTicketer(empId: string) {
+    setExpandedDate(null);
+    setExpandedTicketer(prev => (prev === empId ? null : empId));
+  }
+
+  const ticketerByRoute = useMemo<RouteAggregate[]>(() => {
+    const map = new Map<string, RouteAggregate>();
+    for (const r of ticketerBreakdown) {
+      const key = `${r.departureTerminalName}→${r.arrivalTerminalName}`;
+      const cur = map.get(key) ?? { departure: r.departureTerminalName, arrival: r.arrivalTerminalName, trips: 0, passengers: 0, distanceKm: 0, tariff: 0, totalServiceCharge: 0, totalCollected: 0 };
+      cur.trips += r.trips; cur.passengers += r.passengers; cur.distanceKm += r.distanceKm;
+      cur.tariff += r.tariff; cur.totalServiceCharge += r.totalServiceCharge; cur.totalCollected += r.totalCollected;
+      map.set(key, cur);
+    }
+    return [...map.values()].sort((a, b) => b.totalCollected - a.totalCollected);
+  }, [ticketerBreakdown]);
+
+  const ticketerByDate = useMemo<DateAggregate[]>(() => {
+    const map = new Map<string, DateAggregate>();
+    for (const r of ticketerBreakdown) {
+      const cur = map.get(r.date) ?? { date: r.date, trips: 0, passengers: 0, distanceKm: 0, tariff: 0, totalServiceCharge: 0, totalCollected: 0 };
+      cur.trips += r.trips; cur.passengers += r.passengers; cur.distanceKm += r.distanceKm;
+      cur.tariff += r.tariff; cur.totalServiceCharge += r.totalServiceCharge; cur.totalCollected += r.totalCollected;
+      map.set(r.date, cur);
+    }
+    return [...map.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [ticketerBreakdown]);
 
   const loadLogs = useCallback(async () => {
     try {
@@ -604,29 +685,157 @@ export default function SalesPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
-                      {["#", "Ticketer", "Trips", "Passengers", "Distance", "Tariff", "Service charge collected", "Total collected"].map(h => (
+                      {["", "#", "Ticketer", "Trips", "Passengers", "Distance", "Tariff", "Service charge collected", "Total collected"].map(h => (
                         <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {byTicketer.map((r, i) => (
-                      <tr key={r.employeeId} style={{ borderBottom: "1px solid var(--border)" }}>
-                        <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", fontFamily: "monospace" }}>{i + 1}</td>
-                        <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <User size={12} color="var(--muted-foreground)" />
-                            <span style={{ color: "var(--foreground)", fontWeight: 600 }}>{r.employeeName}</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{r.trips.toLocaleString()}</td>
-                        <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{r.passengers.toLocaleString()}</td>
-                        <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.distanceKm)} km</td>
-                        <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.tariff)}</td>
-                        <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.totalServiceCharge)}</td>
-                        <td style={{ padding: "10px 14px", color: "var(--primary)", fontFamily: "monospace", fontWeight: 700 }}>{fmtMoney(r.totalCollected)}</td>
-                      </tr>
-                    ))}
+                    {byTicketer.map((r, i) => {
+                      const expanded = expandedTicketer === r.employeeId;
+                      return (
+                        <Fragment key={r.employeeId}>
+                          <tr onClick={() => toggleTicketer(r.employeeId)} style={{ borderBottom: "1px solid var(--border)", cursor: "pointer", background: expanded ? "color-mix(in srgb, var(--primary) 5%, transparent)" : undefined }}>
+                            <td style={{ padding: "10px 0 10px 14px", width: 20 }}>
+                              <ChevronDown size={14} color="var(--muted-foreground)" style={{ transform: expanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", fontFamily: "monospace" }}>{i + 1}</td>
+                            <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                <User size={12} color="var(--muted-foreground)" />
+                                <span style={{ color: "var(--foreground)", fontWeight: 600 }}>{r.employeeName}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{r.trips.toLocaleString()}</td>
+                            <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{r.passengers.toLocaleString()}</td>
+                            <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.distanceKm)} km</td>
+                            <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.tariff)}</td>
+                            <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.totalServiceCharge)}</td>
+                            <td style={{ padding: "10px 14px", color: "var(--primary)", fontFamily: "monospace", fontWeight: 700 }}>{fmtMoney(r.totalCollected)}</td>
+                          </tr>
+                          {expanded && (
+                            <tr>
+                              <td colSpan={9} style={{ padding: 0, background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
+                                <div style={{ padding: 16 }}>
+                                  {/* Route / Date sub-toggle */}
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                                    <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{r.employeeName} — detailed breakdown</p>
+                                    <div style={{ display: "flex", gap: 2, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: 2 }}>
+                                      {([["date", "By date"], ["route", "By route"]] as const).map(([id, label]) => (
+                                        <button key={id} onClick={() => setTicketerDetailView(id)} style={{
+                                          height: 28, padding: "0 12px", borderRadius: 6, border: "none",
+                                          background: ticketerDetailView === id ? "var(--primary)" : "transparent",
+                                          color: ticketerDetailView === id ? "#fff" : "var(--muted-foreground)",
+                                          fontSize: 12, fontWeight: 600, cursor: "pointer",
+                                        }}>
+                                          {label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {ticketerBreakdownLoading ? (
+                                    <div style={{ padding: "20px 0", textAlign: "center", color: "var(--muted-foreground)", fontSize: 12 }}>Loading breakdown…</div>
+                                  ) : ticketerBreakdown.length === 0 ? (
+                                    <div style={{ padding: "20px 0", textAlign: "center", color: "var(--muted-foreground)", fontSize: 12 }}>No trips for this ticketer under the current filters.</div>
+                                  ) : ticketerDetailView === "route" ? (
+                                    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                        <thead>
+                                          <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                                            {["Route", "Trips", "Passengers", "Distance", "Tariff", "Service charge", "Total collected"].map(h => (
+                                              <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: 10, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {ticketerByRoute.map(row => (
+                                            <tr key={`${row.departure}→${row.arrival}`} style={{ borderBottom: "1px solid var(--border)" }}>
+                                              <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                                  <RouteIcon size={11} color="var(--muted-foreground)" />
+                                                  <span style={{ color: "var(--foreground)" }}>{row.departure} → {row.arrival}</span>
+                                                </div>
+                                              </td>
+                                              <td style={{ padding: "8px 12px", color: "var(--foreground)" }}>{row.trips.toLocaleString()}</td>
+                                              <td style={{ padding: "8px 12px", color: "var(--foreground)" }}>{row.passengers.toLocaleString()}</td>
+                                              <td style={{ padding: "8px 12px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(row.distanceKm)} km</td>
+                                              <td style={{ padding: "8px 12px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(row.tariff)}</td>
+                                              <td style={{ padding: "8px 12px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(row.totalServiceCharge)}</td>
+                                              <td style={{ padding: "8px 12px", color: "var(--primary)", fontFamily: "monospace", fontWeight: 700 }}>{fmtMoney(row.totalCollected)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                        <thead>
+                                          <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                                            {["", "Date", "Trips", "Passengers", "Distance", "Tariff", "Service charge", "Total collected"].map(h => (
+                                              <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: 10, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {ticketerByDate.map(row => {
+                                            const dateExpanded = expandedDate === row.date;
+                                            const routesForDate = ticketerBreakdown.filter(b => b.date === row.date);
+                                            return (
+                                              <Fragment key={row.date}>
+                                                <tr onClick={() => setExpandedDate(dateExpanded ? null : row.date)} style={{ borderBottom: "1px solid var(--border)", cursor: "pointer", background: dateExpanded ? "color-mix(in srgb, var(--primary) 5%, transparent)" : undefined }}>
+                                                  <td style={{ padding: "8px 0 8px 12px", width: 18 }}>
+                                                    <ChevronDown size={12} color="var(--muted-foreground)" style={{ transform: dateExpanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+                                                  </td>
+                                                  <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                                      <Calendar size={11} color="var(--muted-foreground)" />
+                                                      <div>
+                                                        <div style={{ color: "var(--foreground)" }}>{fmtDay(row.date)}</div>
+                                                        <div style={{ color: "var(--muted-foreground)", fontSize: 10 }}>{ethiopianDayLabel(row.date)}</div>
+                                                      </div>
+                                                    </div>
+                                                  </td>
+                                                  <td style={{ padding: "8px 12px", color: "var(--foreground)" }}>{row.trips.toLocaleString()}</td>
+                                                  <td style={{ padding: "8px 12px", color: "var(--foreground)" }}>{row.passengers.toLocaleString()}</td>
+                                                  <td style={{ padding: "8px 12px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(row.distanceKm)} km</td>
+                                                  <td style={{ padding: "8px 12px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(row.tariff)}</td>
+                                                  <td style={{ padding: "8px 12px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(row.totalServiceCharge)}</td>
+                                                  <td style={{ padding: "8px 12px", color: "var(--primary)", fontFamily: "monospace", fontWeight: 700 }}>{fmtMoney(row.totalCollected)}</td>
+                                                </tr>
+                                                {dateExpanded && (
+                                                  <tr>
+                                                    <td colSpan={8} style={{ padding: "6px 12px 12px 34px", background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
+                                                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
+                                                        Routes worked on {fmtDay(row.date)}
+                                                      </div>
+                                                      {routesForDate.map(rt => (
+                                                        <div key={`${rt.date}-${rt.departureTerminalName}-${rt.arrivalTerminalName}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                                                          <span style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--foreground)" }}>
+                                                            <RouteIcon size={11} color="var(--muted-foreground)" /> {rt.departureTerminalName} → {rt.arrivalTerminalName}
+                                                          </span>
+                                                          <span style={{ color: "var(--muted-foreground)" }}>{rt.trips} trip{rt.trips === 1 ? "" : "s"} · {rt.passengers} pax</span>
+                                                          <span style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--primary)" }}>{fmtMoney(rt.totalCollected)}</span>
+                                                        </div>
+                                                      ))}
+                                                    </td>
+                                                  </tr>
+                                                )}
+                                              </Fragment>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
