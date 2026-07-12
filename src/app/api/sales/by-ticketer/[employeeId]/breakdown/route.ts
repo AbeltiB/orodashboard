@@ -25,6 +25,15 @@ type RawRow = {
  * client re-slice it into "by route" and "by date" views, and expand any
  * date into the routes worked that day, without extra round-trips.
  * Accepts the same filters as /api/sales/trips.
+ *
+ * The WHERE clause is intentionally static SQL text with nullable bound
+ * parameters (`$n IS NULL OR ...`) rather than conditionally-composed
+ * Prisma.sql fragments joined together — nesting Prisma.Sql fragments
+ * inside another $queryRaw template isn't reliably flattened by this
+ * Prisma version's driver-adapter path (it got serialized to a JSON string
+ * and bound as a single parameter instead of spliced as raw SQL, which
+ * Postgres then rejected). Plain scalar parameters, including null,
+ * bind correctly, so that's what this uses throughout.
  */
 export async function GET(request: NextRequest, context: Context) {
   const auth = await requirePermission(request, "sales", "view");
@@ -35,24 +44,15 @@ export async function GET(request: NextRequest, context: Context) {
     if (!employeeId) return badRequest("employeeId is required.");
 
     const { searchParams } = new URL(request.url);
-    const dateFrom = searchParams.get("dateFrom")?.trim();
-    const dateTo = searchParams.get("dateTo")?.trim();
-    const departureTerminal = searchParams.get("departureTerminal")?.trim();
-    const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim();
+    const dateFrom = searchParams.get("dateFrom")?.trim() || null;
+    const dateTo = searchParams.get("dateTo")?.trim() || null;
+    const departureTerminal = searchParams.get("departureTerminal")?.trim() || null;
+    const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim() || null;
     const plateNo = searchParams.get("plateNo")?.trim();
     const search = searchParams.get("search")?.trim();
 
-    const conditions: Prisma.Sql[] = [Prisma.sql`"employeeExternalId" = ${employeeId}`];
-    if (dateFrom) conditions.push(Prisma.sql`"date" >= ${new Date(dateFrom)}`);
-    if (dateTo) conditions.push(Prisma.sql`"date" <= ${new Date(dateTo)}`);
-    if (departureTerminal) conditions.push(Prisma.sql`"departureTerminalName" = ${departureTerminal}`);
-    if (arrivalTerminal) conditions.push(Prisma.sql`"arrivalTerminalName" = ${arrivalTerminal}`);
-    if (plateNo) conditions.push(Prisma.sql`"vehiclePlateNo" ILIKE ${`%${plateNo}%`}`);
-    if (search) {
-      const s = `%${search}%`;
-      conditions.push(Prisma.sql`("employeeName" ILIKE ${s} OR "departureTerminalName" ILIKE ${s} OR "arrivalTerminalName" ILIKE ${s} OR "vehiclePlateNo" ILIKE ${s})`);
-    }
-    const where = Prisma.join(conditions, " AND ");
+    const plateLike = plateNo ? `%${plateNo}%` : null;
+    const searchLike = search ? `%${search}%` : null;
 
     const rows = await prisma.$queryRaw<RawRow[]>`
       SELECT
@@ -65,7 +65,19 @@ export async function GET(request: NextRequest, context: Context) {
         SUM("tariff") as tariff,
         SUM("totalServiceCharge") as "totalServiceCharge"
       FROM "sales_trips"
-      WHERE ${where}
+      WHERE "employeeExternalId" = ${employeeId}
+        AND (${dateFrom}::timestamp IS NULL OR "date" >= ${dateFrom}::timestamp)
+        AND (${dateTo}::timestamp IS NULL OR "date" <= ${dateTo}::timestamp)
+        AND (${departureTerminal}::text IS NULL OR "departureTerminalName" = ${departureTerminal}::text)
+        AND (${arrivalTerminal}::text IS NULL OR "arrivalTerminalName" = ${arrivalTerminal}::text)
+        AND (${plateLike}::text IS NULL OR "vehiclePlateNo" ILIKE ${plateLike}::text)
+        AND (
+          ${searchLike}::text IS NULL
+          OR "employeeName" ILIKE ${searchLike}::text
+          OR "departureTerminalName" ILIKE ${searchLike}::text
+          OR "arrivalTerminalName" ILIKE ${searchLike}::text
+          OR "vehiclePlateNo" ILIKE ${searchLike}::text
+        )
       GROUP BY day, "departureTerminalName", "arrivalTerminalName"
       ORDER BY day DESC, "arrivalTerminalName" ASC
     `;

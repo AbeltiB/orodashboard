@@ -330,7 +330,12 @@ export default function SalesPage() {
   const loadTicketerBreakdown = useCallback(async (empId: string) => {
     setTicketerBreakdownLoading(true);
     try {
-      const res = await apiFetch<{ data: TicketerBreakdownRow[] }>(`/api/sales/by-ticketer/${empId}/breakdown?${buildFilterParams().toString()}`);
+      // employeeId comes from the path here, not the query — drop the
+      // global ticketer filter (if set) from the params so it can't be
+      // misread as scoping this specific ticketer's own breakdown.
+      const params = buildFilterParams();
+      params.delete("employeeId");
+      const res = await apiFetch<{ data: TicketerBreakdownRow[] }>(`/api/sales/by-ticketer/${empId}/breakdown?${params.toString()}`);
       setTicketerBreakdown(res.data);
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Failed to load ticketer breakdown.");
@@ -369,6 +374,23 @@ export default function SalesPage() {
       map.set(r.date, cur);
     }
     return [...map.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [ticketerBreakdown]);
+
+  // Grand total across whatever's currently loaded — already scoped by the
+  // active date range / route / plate filters, so this is literally "the
+  // sum for that date (range)" the moment a date filter is set above.
+  const ticketerFilteredSummary = useMemo(() => {
+    return ticketerBreakdown.reduce(
+      (acc, r) => ({
+        trips: acc.trips + r.trips,
+        passengers: acc.passengers + r.passengers,
+        distanceKm: acc.distanceKm + r.distanceKm,
+        tariff: acc.tariff + r.tariff,
+        totalServiceCharge: acc.totalServiceCharge + r.totalServiceCharge,
+        totalCollected: acc.totalCollected + r.totalCollected,
+      }),
+      { trips: 0, passengers: 0, distanceKm: 0, tariff: 0, totalServiceCharge: 0, totalCollected: 0 }
+    );
   }, [ticketerBreakdown]);
 
   const loadLogs = useCallback(async () => {
@@ -733,6 +755,20 @@ export default function SalesPage() {
                                       ))}
                                     </div>
                                   </div>
+
+                                  {/* Sum for whatever date range / filters are currently active */}
+                                  {!ticketerBreakdownLoading && ticketerBreakdown.length > 0 && (
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center", padding: "10px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)", marginBottom: 12 }}>
+                                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                        {dateFrom || dateTo ? `${dateFrom ? fmtDay(dateFrom) : "Start"} → ${dateTo ? fmtDay(dateTo) : "Now"}` : "All time"}
+                                      </span>
+                                      <span style={{ fontSize: 12, color: "var(--foreground)" }}>{ticketerFilteredSummary.trips.toLocaleString()} trips</span>
+                                      <span style={{ fontSize: 12, color: "var(--foreground)" }}>{ticketerFilteredSummary.passengers.toLocaleString()} passengers</span>
+                                      <span style={{ fontSize: 12, color: "var(--foreground)" }}>{fmtMoney(ticketerFilteredSummary.tariff)} tariff</span>
+                                      <span style={{ fontSize: 12, color: "var(--foreground)" }}>{fmtMoney(ticketerFilteredSummary.totalServiceCharge)} service charge</span>
+                                      <span style={{ fontSize: 13, color: "var(--primary)", fontWeight: 700, marginLeft: "auto" }}>{fmtMoney(ticketerFilteredSummary.totalCollected)} total collected</span>
+                                    </div>
+                                  )}
 
                                   {ticketerBreakdownLoading ? (
                                     <div style={{ padding: "20px 0", textAlign: "center", color: "var(--muted-foreground)", fontSize: 12 }}>Loading breakdown…</div>
