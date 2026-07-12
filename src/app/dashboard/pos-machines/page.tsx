@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Monitor, Plus, Pencil, Trash2, X, Check, Search,
   AlertCircle, MapPin, User, ChevronRight, Clock,
-  History, Info, ArrowRightLeft,
+  History, ArrowRightLeft, Play, Square, Repeat,
 } from "lucide-react";
 
 // ─── Types matching the POS API ───────────────────────────────────────────────
@@ -27,6 +27,8 @@ type AssignmentEntry = {
   remark?: string | null;
 };
 
+type PosAssignmentMode = "EXCLUSIVE" | "SHARED";
+
 type PosMachine = {
   id: string;
   code: string;
@@ -36,11 +38,26 @@ type PosMachine = {
   status: APIStatus;
   appVersion: string;
   remark?: string | null;
+  assignmentMode: PosAssignmentMode;
   stationId?: string | null;
   station?: { id: string; name: string; code: string } | null;
   employeeId?: string | null;
   employee?: { id: string; code: string; name: string } | null;
   history: AssignmentEntry[];
+};
+
+type PosSession = {
+  id: string;
+  posMachineId: string;
+  employeeId: string;
+  employeeCode?: string | null;
+  employeeName: string;
+  stationId?: string | null;
+  stationName?: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  note?: string | null;
+  loggedBy?: string | null;
 };
 
 type StationOption = { id: string; name: string; code: string };
@@ -72,6 +89,10 @@ function statusStyle(s: APIStatus): { bg: string; fg: string } {
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function fmtDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function duration(from: string, to: string | null) {
@@ -139,6 +160,7 @@ type PosFormData = {
   serial: string;
   status: APIStatus;
   appVersion: string;
+  assignmentMode: PosAssignmentMode;
   stationId: string;
   employeeId: string;
   remark: string;
@@ -157,17 +179,13 @@ function POSFormModal({
   onSaved: () => void;
   onClose: () => void;
 }) {
-  const blank: PosFormData = {
-    make: "", model: "", serial: "", status: "ACTIVE",
-    appVersion: APP_VERSIONS[0],
-    stationId: "", employeeId: "", remark: "",
-  };
   const [form, setForm] = useState<PosFormData>({
     make: initial?.make ?? "",
     model: initial?.model ?? "",
     serial: initial?.serial ?? "",
     status: initial?.status ?? "ACTIVE",
     appVersion: initial?.appVersion ?? APP_VERSIONS[0],
+    assignmentMode: initial?.assignmentMode ?? "EXCLUSIVE",
     stationId: initial?.stationId ?? "",
     employeeId: initial?.employeeId ?? "",
     remark: initial?.remark ?? "",
@@ -177,6 +195,7 @@ function POSFormModal({
 
   const set = <K extends keyof PosFormData>(k: K, v: PosFormData[K]) => setForm(f => ({ ...f, [k]: v }));
 
+  const isShared = form.assignmentMode === "SHARED";
   const filteredEmployees = employees.filter(e => !form.stationId || e.stationId === form.stationId);
   const valid = form.make.trim() && form.model.trim() && form.serial.trim();
 
@@ -184,37 +203,49 @@ function POSFormModal({
     if (!valid || saving) return;
     setSaving(true); setError(null);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         make: form.make.trim(),
         model: form.model.trim(),
         serial: form.serial.trim().toUpperCase(),
         status: form.status,
         appVersion: form.appVersion,
         remark: form.remark.trim() || undefined,
-        stationId: form.stationId || undefined,
-        employeeId: form.employeeId || undefined,
       };
 
-      let savedId = initial?.id;
       if (initial) {
+        // SHARED machines have no per-person custody, so their station is a
+        // plain field; EXCLUSIVE machines must route station changes through
+        // /assign so PosMachineHistory stays trustworthy (assignmentMode and
+        // employeeId are excluded from the update schema entirely).
+        if (isShared) payload.stationId = form.stationId || undefined;
         await apiFetch(`/api/pos-machines/${initial.id}`, { method: "PATCH", body: JSON.stringify(payload) });
-        const assignChanged =
-          form.stationId !== (initial.stationId ?? "") ||
-          form.employeeId !== (initial.employeeId ?? "");
-        if (assignChanged && savedId) {
-          await apiFetch(`/api/pos-machines/${savedId}/assign`, {
-            method: "POST",
-            body: JSON.stringify({
-              employeeId: form.employeeId || null,
-              stationId: form.stationId || null,
-              fromDate: new Date().toISOString().slice(0, 10),
-              remark: "",
-            }),
-          });
+
+        if (!isShared) {
+          const assignChanged =
+            form.stationId !== (initial.stationId ?? "") ||
+            form.employeeId !== (initial.employeeId ?? "");
+          if (assignChanged) {
+            await apiFetch(`/api/pos-machines/${initial.id}/assign`, {
+              method: "POST",
+              body: JSON.stringify({
+                employeeId: form.employeeId || null,
+                stationId: form.stationId || null,
+                fromDate: new Date().toISOString().slice(0, 10),
+                remark: "",
+              }),
+            });
+          }
         }
       } else {
-        const created = await apiFetch<{ id: string }>("/api/pos-machines", { method: "POST", body: JSON.stringify(payload) });
-        savedId = created.id;
+        await apiFetch("/api/pos-machines", {
+          method: "POST",
+          body: JSON.stringify({
+            ...payload,
+            assignmentMode: form.assignmentMode,
+            stationId: form.stationId || undefined,
+            employeeId: isShared ? undefined : (form.employeeId || undefined),
+          }),
+        });
       }
 
       onSaved();
@@ -253,21 +284,46 @@ function POSFormModal({
 
         {/* Divider */}
         <div style={{ gridColumn: "span 2", borderTop: "1px solid var(--border)", margin: "6px 0 14px" }}>
-          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", margin: "10px 0 0" }}>Current assignment</p>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", margin: "10px 0 0" }}>Assignment mode</p>
         </div>
 
-        <Field label="Station">
+        <Field label="Assignment mode" span2>
+          {initial ? (
+            <div style={{ ...selCss, display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--background)", color: "var(--muted-foreground)", cursor: "default" }}>
+              <span>{isShared ? "Shared — rotates by shift" : "Exclusive — one operator"}</span>
+              <span style={{ fontSize: 11 }}>Change from detail panel</span>
+            </div>
+          ) : (
+            <select style={selCss} value={form.assignmentMode} onChange={e => {
+              const v = e.target.value as PosAssignmentMode;
+              set("assignmentMode", v);
+              if (v === "SHARED") set("employeeId", "");
+            }}>
+              <option value="EXCLUSIVE">Exclusive — one operator, standard custody</option>
+              <option value="SHARED">Shared — station hardware, rotates by shift/session</option>
+            </select>
+          )}
+        </Field>
+
+        {/* Divider */}
+        <div style={{ gridColumn: "span 2", borderTop: "1px solid var(--border)", margin: "6px 0 14px" }}>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", margin: "10px 0 0" }}>{isShared ? "Location" : "Current assignment"}</p>
+        </div>
+
+        <Field label="Station" span2={isShared}>
           <select style={selCss} value={form.stationId} onChange={e => { set("stationId", e.target.value); set("employeeId", ""); }}>
             <option value="">Unassigned</option>
             {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </Field>
-        <Field label="Assigned to (employee)">
-          <select style={selCss} value={form.employeeId} onChange={e => set("employeeId", e.target.value)} disabled={!form.stationId}>
-            <option value="">Unassigned</option>
-            {filteredEmployees.map(e => <option key={e.id} value={e.id}>{e.code} — {e.name}</option>)}
-          </select>
-        </Field>
+        {!isShared && (
+          <Field label="Assigned to (employee)">
+            <select style={selCss} value={form.employeeId} onChange={e => set("employeeId", e.target.value)} disabled={!form.stationId}>
+              <option value="">Unassigned</option>
+              {filteredEmployees.map(e => <option key={e.id} value={e.id}>{e.code} — {e.name}</option>)}
+            </select>
+          </Field>
+        )}
 
         <Field label="Remark / notes" span2>
           <textarea style={taCss} value={form.remark} onChange={e => set("remark", e.target.value)} placeholder="Any comments about condition, deployment notes, etc." />
@@ -374,6 +430,195 @@ function ReassignModal({
   );
 }
 
+// ─── Start session modal (SHARED machines) ────────────────────────────────────
+
+function StartSessionModal({
+  pos,
+  employees,
+  onSaved,
+  onClose,
+}: {
+  pos: PosMachine;
+  employees: EmployeeOption[];
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const stationEmployees = employees.filter(e => !pos.stationId || e.stationId === pos.stationId);
+  const [employeeId, setEmployeeId] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  async function save() {
+    if (!employeeId || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/pos-machines/${pos.id}/sessions`, {
+        method: "POST",
+        body: JSON.stringify({ employeeId, note: note.trim() || undefined }),
+      });
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to start session.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Start POS session" onClose={onClose}>
+      <p style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 18 }}>
+        Log an operator onto <strong style={{ color: "var(--foreground)" }}>{pos.serial}</strong>. Any currently open session on this machine will be closed automatically.
+      </p>
+      <Field label="Operator (employee) *">
+        <select style={selCss} value={employeeId} onChange={e => setEmployeeId(e.target.value)} autoFocus>
+          <option value="">Select employee…</option>
+          {stationEmployees.map(e => <option key={e.id} value={e.id}>{e.code} — {e.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Note (optional)">
+        <textarea style={taCss} value={note} onChange={e => setNote(e.target.value)} placeholder="Shift, handover notes, etc." />
+      </Field>
+
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fee2e2", borderRadius: 8, marginTop: 4, marginBottom: 4 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+        <button onClick={onClose} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+        <button onClick={save} disabled={!employeeId || saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: employeeId && !saving ? 1 : 0.5, display: "flex", alignItems: "center", gap: 7 }}>
+          {saving && <span style={{ width: 16, height: 16, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite", display: "inline-block" }} />}
+          Start session
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── End session modal (SHARED machines) ──────────────────────────────────────
+
+function EndSessionModal({
+  pos,
+  session,
+  onSaved,
+  onClose,
+}: {
+  pos: PosMachine;
+  session: PosSession;
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const [note, setNote] = useState(session.note ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  async function confirm() {
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/pos-machines/${pos.id}/sessions/${session.id}/end`, {
+        method: "POST",
+        body: JSON.stringify({ note: note.trim() || undefined }),
+      });
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to end session.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="End POS session" onClose={onClose}>
+      <p style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 18 }}>
+        End the session for <strong style={{ color: "var(--foreground)" }}>{session.employeeName}</strong> on <strong style={{ color: "var(--foreground)" }}>{pos.serial}</strong>?
+      </p>
+      <Field label="Note (optional)">
+        <textarea style={taCss} value={note} onChange={e => setNote(e.target.value)} placeholder="Handover notes, discrepancies, etc." />
+      </Field>
+
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fee2e2", borderRadius: 8, marginTop: 4, marginBottom: 4 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+        <button onClick={onClose} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+        <button onClick={confirm} disabled={saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "#dc2626", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: saving ? 0.6 : 1, display: "flex", alignItems: "center", gap: 7 }}>
+          {saving && <span style={{ width: 16, height: 16, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite", display: "inline-block" }} />}
+          End session
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Switch assignment mode modal ─────────────────────────────────────────────
+
+function SwitchModeModal({
+  pos,
+  onSaved,
+  onClose,
+}: {
+  pos: PosMachine;
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const target = pos.assignmentMode === "EXCLUSIVE" ? "SHARED" : "EXCLUSIVE";
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  async function confirm() {
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/pos-machines/${pos.id}/mode`, {
+        method: "POST",
+        body: JSON.stringify({ assignmentMode: target }),
+      });
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to switch mode.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={`Switch to ${target === "SHARED" ? "shared" : "exclusive"} mode`} onClose={onClose}>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 24 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: "#fef3c7", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <AlertCircle size={20} color="#d97706" />
+        </div>
+        <p style={{ fontSize: 14, color: "var(--muted-foreground)", lineHeight: 1.6, margin: 0 }}>
+          {target === "SHARED"
+            ? <>This clears <strong style={{ color: "var(--foreground)" }}>{pos.serial}</strong>&rsquo;s exclusive operator and closes its open assignment. It becomes station hardware that operators log sessions onto by shift.</>
+            : <>This closes any open session on <strong style={{ color: "var(--foreground)" }}>{pos.serial}</strong>. You&rsquo;ll assign a single operator via Reassign afterward.</>
+          }
+        </p>
+      </div>
+
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fee2e2", borderRadius: 8, marginBottom: 16 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button onClick={onClose} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+        <button onClick={confirm} disabled={saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: saving ? 0.6 : 1, display: "flex", alignItems: "center", gap: 7 }}>
+          {saving && <span style={{ width: 16, height: 16, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite", display: "inline-block" }} />}
+          Confirm switch
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Delete modal ─────────────────────────────────────────────────────────────
 
 function DeleteModal({ serial, onConfirm, onClose }: { serial: string; onConfirm: () => void; onClose: () => void }) {
@@ -397,17 +642,23 @@ function DeleteModal({ serial, onConfirm, onClose }: { serial: string; onConfirm
 
 // ─── Detail Panel ─────────────────────────────────────────────────────────────
 
-type Tab = "current" | "history";
+type Tab = "current" | "sessions" | "history";
 
-function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
+function DetailPanel({ pos, sessions, onEdit, onDelete, onReassign, onStartSession, onEndSession, onSwitchMode, onReload }: {
   pos: PosMachine;
+  sessions: PosSession[];
   onEdit: () => void;
   onDelete: () => void;
   onReassign: () => void;
+  onStartSession: () => void;
+  onEndSession: () => void;
+  onSwitchMode: () => void;
   onReload: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("current");
   const ss = statusStyle(pos.status);
+  const isShared = pos.assignmentMode === "SHARED";
+  const openSession = sessions.find(s => s.endedAt === null) ?? null;
 
   // inline remark edit
   const [editingRemark, setEditingRemark] = useState(false);
@@ -464,6 +715,7 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
             <div style={{ fontSize: 14, color: "var(--muted-foreground)", marginTop: 2 }}>{pos.make} {pos.model}</div>
             <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
               <Badge label={statusLabel(pos.status)} bg={ss.bg} fg={ss.fg} />
+              <Badge label={isShared ? "Shared" : "Exclusive"} bg={isShared ? "#ede9fe" : "#f1f5f9"} fg={isShared ? "#7c3aed" : "#475569"} />
               <Badge
                 label={pos.appVersion}
                 bg={isOutdated ? "#fef3c7" : "#dbeafe"}
@@ -475,8 +727,23 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <button onClick={onReassign} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "var(--foreground)", fontWeight: 500 }}>
-              <ArrowRightLeft size={13} /> Reassign
+            {isShared ? (
+              openSession ? (
+                <button onClick={onEndSession} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid #fecaca", background: "#fff5f5", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "#dc2626", fontWeight: 500 }}>
+                  <Square size={13} /> End session
+                </button>
+              ) : (
+                <button onClick={onStartSession} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "var(--foreground)", fontWeight: 500 }}>
+                  <Play size={13} /> Start session
+                </button>
+              )
+            ) : (
+              <button onClick={onReassign} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "var(--foreground)", fontWeight: 500 }}>
+                <ArrowRightLeft size={13} /> Reassign
+              </button>
+            )}
+            <button onClick={onSwitchMode} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "var(--foreground)", fontWeight: 500 }}>
+              <Repeat size={13} /> {isShared ? "Switch to exclusive" : "Switch to shared"}
             </button>
             <button onClick={onEdit} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "var(--foreground)", fontWeight: 500 }}>
               <Pencil size={13} /> Edit
@@ -490,9 +757,9 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
         {/* Stats row */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
           {[
-            { label: "Station",       value: pos.station?.name  || "Unassigned",        icon: <MapPin size={13} /> },
-            { label: "Operator",      value: pos.employee?.name || "Unassigned",         icon: <User size={13} /> },
-            { label: "Assignments",   value: `${pos.history.length} total`,          icon: <History size={13} /> },
+            { label: "Station",       value: pos.station?.name || "Unassigned", icon: <MapPin size={13} /> },
+            { label: isShared ? "Current operator" : "Operator", value: isShared ? (openSession?.employeeName || "No active session") : (pos.employee?.name || "Unassigned"), icon: <User size={13} /> },
+            { label: isShared ? "Sessions" : "Assignments", value: isShared ? `${sessions.length} total` : `${pos.history.length} total`, icon: <History size={13} /> },
           ].map(s => (
             <div key={s.label} style={{ background: "var(--background)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--muted-foreground)", fontSize: 11, marginBottom: 4 }}>{s.icon} {s.label}</div>
@@ -504,6 +771,7 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
         {/* Tab bar */}
         <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border)" }}>
           <TabBtn id="current" label="Current" />
+          <TabBtn id="sessions" label="Sessions" count={sessions.length} />
           <TabBtn id="history" label="Assignment history" count={pos.history.length} />
         </div>
       </div>
@@ -521,8 +789,35 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
             <InfoRow label="Status"        value={statusLabel(pos.status)} />
             <InfoRow label="App version"   value={pos.appVersion} accent={!isOutdated} />
 
-            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", marginBottom: 8, marginTop: 22 }}>Current assignment</p>
-            {pos.station || pos.employee ? (
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", marginBottom: 8, marginTop: 22 }}>{isShared ? "Current session" : "Current assignment"}</p>
+            {isShared ? (
+              openSession ? (
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "12px 14px", borderRadius: 10, border: "1px solid color-mix(in srgb, var(--primary) 25%, transparent)", background: "color-mix(in srgb, var(--primary) 6%, transparent)", marginBottom: 8 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 9, background: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <User size={16} color="#16a34a" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{openSession.employeeName}</div>
+                    <div style={{ fontSize: 12, color: "var(--muted-foreground)", fontFamily: "monospace", marginBottom: 4 }}>{openSession.employeeCode}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted-foreground)" }}>
+                      <Clock size={11} /> Started {fmtDateTime(openSession.startedAt)}
+                    </div>
+                    {openSession.stationName && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>
+                        <MapPin size={11} /> {openSession.stationName}
+                      </div>
+                    )}
+                    {openSession.note && (
+                      <div style={{ marginTop: 6, fontSize: 12, color: "var(--muted-foreground)", fontStyle: "italic" }}>{openSession.note}</div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: "14px 16px", borderRadius: 10, border: "1px dashed var(--border)", background: "var(--background)", fontSize: 13, color: "var(--muted-foreground)", textAlign: "center" }}>
+                  No active session. Use <strong>Start session</strong> to log an operator on this machine.
+                </div>
+              )
+            ) : pos.station || pos.employee ? (
               <>
                 {pos.station && (
                   <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--background)", marginBottom: 8 }}>
@@ -565,6 +860,77 @@ function DetailPanel({ pos, onEdit, onDelete, onReassign, onReload }: {
             ) : (
               <div onClick={() => setEditingRemark(true)} style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--background)", fontSize: 14, color: pos.remark ? "var(--foreground)" : "var(--muted-foreground)", cursor: "pointer", lineHeight: 1.6, minHeight: 52 }}>
                 {pos.remark || <span style={{ fontStyle: "italic" }}>Click to add a remark…</span>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Sessions ── */}
+        {tab === "sessions" && (
+          <div>
+            {sessions.length === 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 0", color: "var(--muted-foreground)" }}>
+                <Play size={32} style={{ marginBottom: 10, opacity: 0.25 }} />
+                <p style={{ fontSize: 13 }}>No sessions logged yet.</p>
+              </div>
+            ) : (
+              <div style={{ position: "relative" }}>
+                {/* Vertical timeline line */}
+                <div style={{ position: "absolute", left: 18, top: 8, bottom: 8, width: 2, background: "var(--border)", borderRadius: 2 }} />
+
+                {sessions.map((s) => {
+                  const isCurrent = s.endedAt === null;
+                  return (
+                    <div key={s.id} style={{ display: "flex", gap: 16, marginBottom: 20, position: "relative" }}>
+                      {/* Timeline dot */}
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", background: isCurrent ? "var(--primary)" : "var(--border)", border: `3px solid var(--surface)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, zIndex: 1 }}>
+                        {isCurrent
+                          ? <Play size={14} color="#fff" />
+                          : <Clock size={14} color="var(--muted-foreground)" />
+                        }
+                      </div>
+
+                      {/* Entry card */}
+                      <div style={{ flex: 1, background: isCurrent ? "color-mix(in srgb, var(--primary) 6%, transparent)" : "var(--background)", border: `1px solid ${isCurrent ? "color-mix(in srgb, var(--primary) 25%, transparent)" : "var(--border)"}`, borderRadius: 12, padding: "12px 16px", marginTop: 2 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                          <div>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--foreground)" }}>
+                              {s.employeeName}
+                            </span>
+                            {isCurrent && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: "var(--primary)", background: "color-mix(in srgb, var(--primary) 12%, transparent)", padding: "1px 8px", borderRadius: 999 }}>Active</span>}
+                          </div>
+                          <span style={{ fontSize: 11, color: "var(--muted-foreground)", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                            {duration(s.startedAt, s.endedAt)}
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted-foreground)" }}>
+                            <MapPin size={11} /> {s.stationName || "No station"}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted-foreground)" }}>
+                            <Clock size={11} />
+                            {fmtDateTime(s.startedAt)} → {s.endedAt ? fmtDateTime(s.endedAt) : <strong style={{ color: "var(--primary)" }}>Present</strong>}
+                          </div>
+                        </div>
+
+                        {s.note && (
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--muted-foreground)", fontStyle: "italic" }}>
+                            {s.note}
+                          </div>
+                        )}
+
+                        {isCurrent && (
+                          <div style={{ marginTop: 10 }}>
+                            <button onClick={onEndSession} style={{ height: 30, padding: "0 12px", borderRadius: 7, border: "1.5px solid #fecaca", background: "#fff5f5", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "#dc2626", fontWeight: 500 }}>
+                              <Square size={12} /> End session
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -643,13 +1009,14 @@ export default function POSMachinesPage() {
   const [machines,  setMachines]  = useState<PosMachine[]>([]);
   const [selected,  setSelected]  = useState<string | null>(null);
   const [activeDetail, setActiveDetail] = useState<PosMachine | null>(null);
+  const [sessions,  setSessions]  = useState<PosSession[]>([]);
   const [stations,  setStations]  = useState<StationOption[]>([]);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState("");
   const [filterSt,  setFilterSt]  = useState<APIStatus | "All">("All");
   const [filterStation, setFilterStation] = useState("All");
-  const [modal,     setModal]     = useState<"create" | "edit" | "delete" | "reassign" | null>(null);
+  const [modal,     setModal]     = useState<"create" | "edit" | "delete" | "reassign" | "start-session" | "end-session" | "switch-mode" | null>(null);
   const [toast,     setToast]     = useState<string | null>(null);
 
   const loadMachines = useCallback(async () => {
@@ -707,6 +1074,16 @@ export default function POSMachinesPage() {
     }
   }, []);
 
+  const loadSessions = useCallback(async (id: string) => {
+    try {
+      const res = await apiFetch<{ data: PosSession[] }>(`/api/pos-machines/${id}/sessions`);
+      setSessions(res.data);
+    } catch (e) {
+      setSessions([]);
+      console.error(e);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -717,9 +1094,14 @@ export default function POSMachinesPage() {
   }, [loadMachines, loadStations, loadEmployees]);
 
   useEffect(() => {
-    if (selected) loadActiveDetail(selected);
-    else setActiveDetail(null);
-  }, [selected, loadActiveDetail]);
+    if (selected) {
+      loadActiveDetail(selected);
+      loadSessions(selected);
+    } else {
+      setActiveDetail(null);
+      setSessions([]);
+    }
+  }, [selected, loadActiveDetail, loadSessions]);
 
   const filtered = useMemo(() => machines.filter(m => {
     const term = search.toLowerCase();
@@ -731,8 +1113,18 @@ export default function POSMachinesPage() {
 
   async function handleSaved() {
     await loadMachines();
-    if (selected) await loadActiveDetail(selected);
-    setToast(modal === "create" ? "POS machine registered" : modal === "reassign" ? "POS machine reassigned" : "POS machine updated");
+    if (selected) {
+      await loadActiveDetail(selected);
+      await loadSessions(selected);
+    }
+    setToast(
+      modal === "create" ? "POS machine registered" :
+      modal === "reassign" ? "POS machine reassigned" :
+      modal === "start-session" ? "Session started" :
+      modal === "end-session" ? "Session ended" :
+      modal === "switch-mode" ? "Assignment mode switched" :
+      "POS machine updated"
+    );
     setModal(null);
   }
 
@@ -773,6 +1165,11 @@ export default function POSMachinesPage() {
       {modal === "edit"     && active && <POSFormModal initial={active} stations={stations} employees={employees} onSaved={handleSaved} onClose={() => setModal(null)} />}
       {modal === "delete"   && active && <DeleteModal serial={active.serial} onConfirm={handleDelete} onClose={() => setModal(null)} />}
       {modal === "reassign" && active && <ReassignModal pos={active} stations={stations} employees={employees} onSaved={handleSaved} onClose={() => setModal(null)} />}
+      {modal === "start-session" && active && <StartSessionModal pos={active} employees={employees} onSaved={handleSaved} onClose={() => setModal(null)} />}
+      {modal === "end-session"   && active && sessions.find(s => s.endedAt === null) && (
+        <EndSessionModal pos={active} session={sessions.find(s => s.endedAt === null)!} onSaved={handleSaved} onClose={() => setModal(null)} />
+      )}
+      {modal === "switch-mode" && active && <SwitchModeModal pos={active} onSaved={handleSaved} onClose={() => setModal(null)} />}
 
       <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--background)", overflow: "hidden" }}>
 
@@ -861,10 +1258,14 @@ export default function POSMachinesPage() {
             {active
               ? <DetailPanel
                   pos={active}
+                  sessions={sessions}
                   onEdit={() => setModal("edit")}
                   onDelete={() => setModal("delete")}
                   onReassign={() => setModal("reassign")}
-                  onReload={() => selected && loadActiveDetail(selected)}
+                  onStartSession={() => setModal("start-session")}
+                  onEndSession={() => setModal("end-session")}
+                  onSwitchMode={() => setModal("switch-mode")}
+                  onReload={() => { if (selected) { loadActiveDetail(selected); loadSessions(selected); } }}
                 />
               : (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--muted-foreground)" }}>
