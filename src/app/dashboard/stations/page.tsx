@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   MapPin, Plus, Pencil, Trash2, X, Check, ChevronRight,
   Users, Monitor, Navigation, Building2, Search, AlertCircle,
-  Loader2,
+  Loader2, Layers, UserPlus, ShieldCheck,
 } from "lucide-react";
 
 // ─── Types — mirror the API response shape ────────────────────────────────────
@@ -30,16 +30,29 @@ type StationCounts = {
   posMachines: number;
 };
 
+type ZoneRef = { id: string; name: string; region: string };
+
 type Station = {
   id: string;
   code: string;
   name: string;
   region: string;
-  zone: string;
+  zoneId: string | null;
+  zone: ZoneRef | null;
   location: string;
   terminals: TerminalRef[];
   counts: StationCounts;
 };
+
+type ZoneSupervisorRef = { employeeId: string; name: string; employeeCode: string; assignedAt: string };
+
+type ZoneDetail = ZoneRef & {
+  description: string | null;
+  stationCount: number;
+  supervisors: ZoneSupervisorRef[];
+};
+
+type SupervisorOption = { id: string; firstName: string; lastName: string; code: string };
 
 // ─── Regions (must match Prisma Region enum values) ───────────────────────────
 
@@ -140,7 +153,7 @@ const selectCss: React.CSSProperties = { ...inputCss, cursor: "pointer" };
 
 // ─── Station form modal ───────────────────────────────────────────────────────
 
-type StationFormData = { name: string; region: string; zone: string; location: string };
+type StationFormData = { name: string; region: string; zoneId: string; location: string };
 
 function StationFormModal({ initial, onSave, onClose }: {
   initial?: Station;
@@ -150,13 +163,54 @@ function StationFormModal({ initial, onSave, onClose }: {
   const [form, setForm] = useState<StationFormData>({
     name:     initial?.name     ?? "",
     region:   initial?.region   ?? "",
-    zone:     initial?.zone     ?? "",
+    zoneId:   initial?.zoneId   ?? "",
     location: initial?.location ?? "",
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState<string | null>(null);
   const set = <K extends keyof StationFormData>(k: K, v: string) => setForm(f => ({ ...f, [k]: v }));
-  const valid = form.name.trim() && form.region && form.zone.trim() && form.location.trim();
+  const valid = form.name.trim() && form.region && form.location.trim();
+
+  // Zones scoped to the currently-selected region
+  const [zones, setZones] = useState<ZoneRef[]>([]);
+  const [zonesLoading, setZonesLoading] = useState(false);
+  const [newZoneOpen, setNewZoneOpen] = useState(false);
+  const [newZoneName, setNewZoneName] = useState("");
+  const [newZoneSaving, setNewZoneSaving] = useState(false);
+
+  const loadZones = useCallback(async (region: string) => {
+    if (!region) { setZones([]); return; }
+    setZonesLoading(true);
+    try {
+      const res = await apiFetch<{ data: ZoneRef[] }>(`/api/zones?region=${region}`);
+      setZones(res.data);
+    } catch {
+      setZones([]);
+    } finally {
+      setZonesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadZones(form.region); }, [form.region, loadZones]);
+
+  async function createZone() {
+    if (!newZoneName.trim() || !form.region || newZoneSaving) return;
+    setNewZoneSaving(true);
+    try {
+      const zone = await apiFetch<ZoneRef>("/api/zones", {
+        method: "POST",
+        body: JSON.stringify({ region: form.region, name: newZoneName.trim() }),
+      });
+      await loadZones(form.region);
+      set("zoneId", zone.id);
+      setNewZoneOpen(false);
+      setNewZoneName("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create zone.");
+    } finally {
+      setNewZoneSaving(false);
+    }
+  }
 
   async function save() {
     if (!valid || saving) return;
@@ -166,7 +220,7 @@ function StationFormModal({ initial, onSave, onClose }: {
         initial ? `/api/stations/${initial.id}` : "/api/stations",
         {
           method: initial ? "PATCH" : "POST",
-          body: JSON.stringify(form),
+          body: JSON.stringify({ ...form, zoneId: form.zoneId || null }),
         }
       );
       // New stations come back without embedded terminal/employee data — normalise
@@ -189,15 +243,39 @@ function StationFormModal({ initial, onSave, onClose }: {
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label="Region *">
-          <select style={selectCss} value={form.region} onChange={e => set("region", e.target.value)}>
+          <select style={selectCss} value={form.region} onChange={e => { set("region", e.target.value); set("zoneId", ""); }}>
             <option value="">Select…</option>
             {REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
         </Field>
-        <Field label="Zone *">
-          <input style={inputCss} value={form.zone} onChange={e => set("zone", e.target.value)} placeholder="e.g. Central" />
+        <Field label="Zone">
+          <select style={selectCss} value={form.zoneId} onChange={e => set("zoneId", e.target.value)} disabled={!form.region || zonesLoading}>
+            <option value="">{form.region ? "No zone" : "Select a region first"}</option>
+            {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </select>
         </Field>
       </div>
+
+      {form.region && (
+        newZoneOpen ? (
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, marginTop: -8 }}>
+            <input style={{ ...inputCss, height: 36, fontSize: 13 }} placeholder="New zone name" value={newZoneName}
+              onChange={e => setNewZoneName(e.target.value)} autoFocus
+              onKeyDown={e => e.key === "Enter" && createZone()} />
+            <button onClick={createZone} disabled={!newZoneName.trim() || newZoneSaving} style={{ height: 36, padding: "0 14px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              Add
+            </button>
+            <button onClick={() => { setNewZoneOpen(false); setNewZoneName(""); }} style={{ height: 36, padding: "0 12px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, cursor: "pointer", color: "var(--foreground)" }}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setNewZoneOpen(true)} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", color: "var(--primary)", fontSize: 12, fontWeight: 600, padding: 0, marginBottom: 16, marginTop: -10 }}>
+            <Plus size={13} /> New zone in {regionLabel(form.region)}
+          </button>
+        )
+      )}
+
       <Field label="Location / address *">
         <input style={inputCss} value={form.location} onChange={e => set("location", e.target.value)} placeholder="Street or landmark" />
       </Field>
@@ -247,6 +325,208 @@ function DeleteModal({ name, onConfirm, onClose }: { name: string; onConfirm: ()
           {deleting && <Spinner />} Delete station
         </button>
       </div>
+    </Modal>
+  );
+}
+
+// ─── Manage zones modal ───────────────────────────────────────────────────────
+
+function ManageZonesModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [zones, setZones] = useState<ZoneDetail[]>([]);
+  const [supervisors, setSupervisors] = useState<SupervisorOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [creating, setCreating] = useState(false);
+  const [newRegion, setNewRegion] = useState("");
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const [addingSupervisorTo, setAddingSupervisorTo] = useState<string | null>(null);
+  const [supervisorPick, setSupervisorPick] = useState("");
+
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const [zonesRes, empRes] = await Promise.all([
+        apiFetch<{ data: ZoneDetail[] }>("/api/zones"),
+        apiFetch<{ data: SupervisorOption[] }>("/api/employees?role=SUPERVISOR&limit=1000"),
+      ]);
+      setZones(zonesRes.data);
+      setSupervisors(empRes.data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load zones.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function createZone() {
+    if (!newRegion || !newName.trim() || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch("/api/zones", { method: "POST", body: JSON.stringify({ region: newRegion, name: newName.trim() }) });
+      setCreating(false); setNewRegion(""); setNewName("");
+      await load(); onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create zone.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function renameZone(id: string) {
+    if (!renameValue.trim() || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/zones/${id}`, { method: "PATCH", body: JSON.stringify({ name: renameValue.trim() }) });
+      setRenamingId(null); setRenameValue("");
+      await load(); onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to rename zone.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteZone(id: string) {
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/zones/${id}`, { method: "DELETE" });
+      await load(); onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete zone.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addSupervisor(zoneId: string) {
+    if (!supervisorPick || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/zones/${zoneId}/supervisors`, { method: "POST", body: JSON.stringify({ employeeId: supervisorPick }) });
+      setAddingSupervisorTo(null); setSupervisorPick("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to assign supervisor.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeSupervisor(zoneId: string, employeeId: string) {
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/zones/${zoneId}/supervisors/${employeeId}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove supervisor.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Manage zones" onClose={onClose}>
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "#fee2e2", borderRadius: 8, marginBottom: 14 }}>
+          <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "#dc2626" }}>{error}</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 30 }}><Spinner /></div>
+      ) : (
+        <>
+          {zones.length === 0 && <p style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 16 }}>No zones yet.</p>}
+
+          {zones.map(z => (
+            <div key={z.id} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", marginBottom: 10, background: "var(--background)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Layers size={14} color="var(--muted-foreground)" style={{ flexShrink: 0 }} />
+                {renamingId === z.id ? (
+                  <input style={{ ...inputCss, height: 32, fontSize: 13, flex: 1 }} value={renameValue}
+                    onChange={e => setRenameValue(e.target.value)} autoFocus
+                    onKeyDown={e => e.key === "Enter" && renameZone(z.id)} />
+                ) : (
+                  <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{z.name}</span>
+                )}
+                <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{regionLabel(z.region)} · {z.stationCount} stations</span>
+                {renamingId === z.id ? (
+                  <>
+                    <button onClick={() => renameZone(z.id)} disabled={saving} style={{ background: "none", border: "none", cursor: "pointer", color: "#16a34a", padding: 4 }}><Check size={14} /></button>
+                    <button onClick={() => { setRenamingId(null); setRenameValue(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", padding: 4 }}><X size={14} /></button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => { setRenamingId(z.id); setRenameValue(z.name); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", padding: 4 }}><Pencil size={13} /></button>
+                    <button onClick={() => deleteZone(z.id)} disabled={saving} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}><Trash2 size={13} /></button>
+                  </>
+                )}
+              </div>
+
+              {/* Supervisors */}
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <ShieldCheck size={12} color="var(--muted-foreground)" />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Zone supervisors</span>
+                </div>
+                {z.supervisors.length === 0 && <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: "0 0 6px" }}>None assigned.</p>}
+                {z.supervisors.map(sup => (
+                  <div key={sup.employeeId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0" }}>
+                    <span style={{ fontSize: 12, color: "var(--foreground)" }}>{sup.name} <span style={{ color: "var(--muted-foreground)" }}>({sup.employeeCode})</span></span>
+                    <button onClick={() => removeSupervisor(z.id, sup.employeeId)} disabled={saving} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontSize: 11 }}>Remove</button>
+                  </div>
+                ))}
+                {addingSupervisorTo === z.id ? (
+                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                    <select style={{ ...selectCss, height: 32, fontSize: 12, flex: 1 }} value={supervisorPick} onChange={e => setSupervisorPick(e.target.value)}>
+                      <option value="">Select supervisor…</option>
+                      {supervisors
+                        .filter(s => !z.supervisors.some(sup => sup.employeeId === s.id))
+                        .map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} ({s.code})</option>)}
+                    </select>
+                    <button onClick={() => addSupervisor(z.id)} disabled={!supervisorPick || saving} style={{ height: 32, padding: "0 10px", borderRadius: 7, border: "none", background: "var(--primary)", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Add</button>
+                    <button onClick={() => { setAddingSupervisorTo(null); setSupervisorPick(""); }} style={{ height: 32, padding: "0 8px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 11, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setAddingSupervisorTo(z.id)} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--primary)", fontSize: 11, fontWeight: 600, padding: 0, marginTop: 4 }}>
+                    <UserPlus size={11} /> Add supervisor
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {creating ? (
+            <div style={{ border: "1.5px solid var(--primary)", borderRadius: 10, padding: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                <select style={{ ...selectCss, height: 36, fontSize: 13 }} value={newRegion} onChange={e => setNewRegion(e.target.value)} autoFocus>
+                  <option value="">Region…</option>
+                  {REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                <input style={{ ...inputCss, height: 36, fontSize: 13 }} placeholder="Zone name" value={newName} onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && createZone()} />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={createZone} disabled={!newRegion || !newName.trim() || saving} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Create</button>
+                <button onClick={() => { setCreating(false); setNewRegion(""); setNewName(""); }} style={{ height: 34, padding: "0 12px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setCreating(true)} style={{ display: "flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", borderRadius: 8, border: "1.5px dashed var(--border)", background: "none", fontSize: 13, color: "var(--primary)", cursor: "pointer", fontWeight: 500 }}>
+              <Plus size={15} /> New zone
+            </button>
+          )}
+        </>
+      )}
     </Modal>
   );
 }
@@ -545,7 +825,7 @@ function DetailPanel({ station, allStations, onEdit, onDelete, onReload }: {
             <MapPin size={11} /> {station.location}
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted-foreground)", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 10px" }}>
-            {regionLabel(station.region)} · {station.zone}
+            {regionLabel(station.region)} · {station.zone?.name ?? "No zone"}
           </span>
         </div>
 
@@ -604,7 +884,7 @@ export default function StationsPage() {
   const [selected,  setSelected]  = useState<string | null>(null);
   const [search,    setSearch]    = useState("");
   const [loading,   setLoading]   = useState(true);
-  const [modal,     setModal]     = useState<"create" | "edit" | "delete" | null>(null);
+  const [modal,     setModal]     = useState<"create" | "edit" | "delete" | "zones" | null>(null);
   const [toast,     setToast]     = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
@@ -633,7 +913,7 @@ export default function StationsPage() {
     return (
       s.name.toLowerCase().includes(term) ||
       regionLabel(s.region).toLowerCase().includes(term) ||
-      s.zone.toLowerCase().includes(term) ||
+      (s.zone?.name ?? "").toLowerCase().includes(term) ||
       s.code.toLowerCase().includes(term)
     );
   });
@@ -689,6 +969,9 @@ export default function StationsPage() {
       {modal === "delete" && activeStation && (
         <DeleteModal name={activeStation.name} onConfirm={handleDelete} onClose={() => setModal(null)} />
       )}
+      {modal === "zones" && (
+        <ManageZonesModal onClose={() => setModal(null)} onChanged={() => loadStations(true)} />
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--background)", overflow: "hidden" }}>
 
@@ -701,9 +984,14 @@ export default function StationsPage() {
                 {loading ? "Loading…" : `${stations.length} station${stations.length !== 1 ? "s" : ""} · Manage locations, terminals, staff and POS`}
               </p>
             </div>
-            <button onClick={() => setModal("create")} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
-              <Plus size={16} strokeWidth={2.5} /> New station
-            </button>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setModal("zones")} style={{ height: 40, padding: "0 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--foreground)", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+                <Layers size={16} /> Manage zones
+              </button>
+              <button onClick={() => setModal("create")} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+                <Plus size={16} strokeWidth={2.5} /> New station
+              </button>
+            </div>
           </div>
         </div>
 
@@ -738,7 +1026,7 @@ export default function StationsPage() {
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600, color: active ? "var(--primary)" : "var(--foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
-                      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 1 }}>{regionLabel(s.region)} · {s.zone}</div>
+                      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 1 }}>{regionLabel(s.region)} · {s.zone?.name ?? "No zone"}</div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
                       <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{s.counts.employees} staff</span>
