@@ -59,6 +59,17 @@ type FilterOptions = {
   employees: { id: string; name: string }[];
 };
 
+type TicketerRow = {
+  employeeId: string;
+  employeeName: string;
+  trips: number;
+  passengers: number;
+  distanceKm: number;
+  tariff: number;
+  totalServiceCharge: number;
+  totalCollected: number;
+};
+
 type SyncProgressEvent =
   | { type: "probe-start" }
   | { type: "probe-result"; sourceTotal: number; ourTotal: number }
@@ -232,17 +243,28 @@ export default function SalesPage() {
   const [logs, setLogs] = useState<SalesSyncLog[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  const [view, setView] = useState<"trips" | "by-ticketer">("trips");
+  const [byTicketer, setByTicketer] = useState<TicketerRow[]>([]);
+  const [byTicketerLoading, setByTicketerLoading] = useState(false);
+
+  const buildFilterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    if (departureTerminal) params.set("departureTerminal", departureTerminal);
+    if (arrivalTerminal) params.set("arrivalTerminal", arrivalTerminal);
+    if (employeeId) params.set("employeeId", employeeId);
+    if (plateNo) params.set("plateNo", plateNo);
+    if (search) params.set("search", search);
+    return params;
+  }, [dateFrom, dateTo, departureTerminal, arrivalTerminal, employeeId, plateNo, search]);
+
   const loadTrips = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
-      if (dateFrom) params.set("dateFrom", dateFrom);
-      if (dateTo) params.set("dateTo", dateTo);
-      if (departureTerminal) params.set("departureTerminal", departureTerminal);
-      if (arrivalTerminal) params.set("arrivalTerminal", arrivalTerminal);
-      if (employeeId) params.set("employeeId", employeeId);
-      if (plateNo) params.set("plateNo", plateNo);
-      if (search) params.set("search", search);
+      const params = buildFilterParams();
+      params.set("offset", String(offset));
+      params.set("limit", String(PAGE_SIZE));
       const res = await apiFetch<{ data: SalesTrip[]; meta: { total: number }; totals: SalesTotals }>(`/api/sales/trips?${params.toString()}`);
       setTrips(res.data);
       setTotal(res.meta.total);
@@ -253,7 +275,20 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [offset, dateFrom, dateTo, departureTerminal, arrivalTerminal, employeeId, plateNo, search]);
+  }, [offset, buildFilterParams]);
+
+  const loadByTicketer = useCallback(async () => {
+    setByTicketerLoading(true);
+    try {
+      const res = await apiFetch<{ data: TicketerRow[] }>(`/api/sales/by-ticketer?${buildFilterParams().toString()}`);
+      setByTicketer(res.data);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load ticketer earnings.");
+    } finally {
+      setByTicketerLoading(false);
+    }
+  }, [buildFilterParams]);
 
   const loadLogs = useCallback(async () => {
     try {
@@ -273,7 +308,8 @@ export default function SalesPage() {
     }
   }, []);
 
-  useEffect(() => { loadTrips(); }, [loadTrips]);
+  useEffect(() => { if (view === "trips") loadTrips(); }, [view, loadTrips]);
+  useEffect(() => { if (view === "by-ticketer") loadByTicketer(); }, [view, loadByTicketer]);
   useEffect(() => { loadLogs(); }, [loadLogs]);
   useEffect(() => { loadFilterOptions(); }, [loadFilterOptions]);
 
@@ -341,7 +377,7 @@ export default function SalesPage() {
       }
 
       setOffset(0);
-      await Promise.all([loadTrips(), loadLogs()]);
+      await Promise.all([view === "trips" ? loadTrips() : loadByTicketer(), loadLogs()]);
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Sync failed");
     } finally {
@@ -536,8 +572,70 @@ export default function SalesPage() {
           </div>
         )}
 
+        {/* View toggle */}
+        <div style={{ display: "flex", gap: 2, marginBottom: 14, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 3, width: "fit-content" }}>
+          {([["trips", "Trips"], ["by-ticketer", "By ticketer"]] as const).map(([id, label]) => {
+            const active = view === id;
+            return (
+              <button key={id} onClick={() => setView(id)} style={{
+                height: 34, padding: "0 16px", borderRadius: 7, border: "none",
+                background: active ? "var(--primary)" : "transparent",
+                color: active ? "#fff" : "var(--muted-foreground)",
+                fontSize: 13, fontWeight: active ? 700 : 500, cursor: "pointer",
+              }}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* By-ticketer earnings table */}
+        {view === "by-ticketer" && (
+          byTicketerLoading ? (
+            <div style={{ padding: 40, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>Loading ticketer earnings…</div>
+          ) : byTicketer.length === 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "60px 0", color: "var(--muted-foreground)" }}>
+              <UsersIcon size={36} style={{ marginBottom: 12, opacity: 0.25 }} />
+              <p style={{ fontSize: 14 }}>No ticketer earnings match these filters.</p>
+            </div>
+          ) : (
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", marginBottom: 18 }}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
+                      {["#", "Ticketer", "Trips", "Passengers", "Distance", "Tariff", "Service charge collected", "Total collected"].map(h => (
+                        <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byTicketer.map((r, i) => (
+                      <tr key={r.employeeId} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", fontFamily: "monospace" }}>{i + 1}</td>
+                        <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <User size={12} color="var(--muted-foreground)" />
+                            <span style={{ color: "var(--foreground)", fontWeight: 600 }}>{r.employeeName}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{r.trips.toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{r.passengers.toLocaleString()}</td>
+                        <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.distanceKm)} km</td>
+                        <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.tariff)}</td>
+                        <td style={{ padding: "10px 14px", color: "var(--foreground)", fontFamily: "monospace" }}>{fmtMoney(r.totalServiceCharge)}</td>
+                        <td style={{ padding: "10px 14px", color: "var(--primary)", fontFamily: "monospace", fontWeight: 700 }}>{fmtMoney(r.totalCollected)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        )}
+
         {/* Trips table */}
-        {loading ? (
+        {view === "trips" && (loading ? (
           <div style={{ padding: 40, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>Loading trips…</div>
         ) : trips.length === 0 ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "60px 0", color: "var(--muted-foreground)" }}>
@@ -608,7 +706,7 @@ export default function SalesPage() {
               </div>
             </div>
           </div>
-        )}
+        ))}
       </div>
     </>
   );
