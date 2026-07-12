@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   FileText, Download, Filter, ChevronDown, ChevronRight,
-  MapPin, Users, Monitor, Wallet, Calculator,
+  MapPin, Users, Monitor, Wallet, Calculator, TrendingUp,
   X, Check, FileSpreadsheet, Printer, RefreshCw, AlertCircle,
 } from "lucide-react";
 
@@ -14,7 +14,8 @@ type ReportId =
   | "petty-cash-ledger"
   | "staff-roster"
   | "pos-fleet"
-  | "station-summary";
+  | "station-summary"
+  | "sales-summary";
 
 type StationOption = { id: string; name: string; region: string };
 type SupervisorOption = { id: string; firstName: string; lastName: string };
@@ -556,6 +557,82 @@ function StationSummaryReport({ stations }: { stations: StationOption[] }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// REPORT 6 — Sales Summary (earnings per ticketer, mirrored from OTA)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type SalesTicketerRow = {
+  employeeId: string; employeeName: string; trips: number; passengers: number;
+  distanceKm: number; tariff: number; totalServiceCharge: number; totalCollected: number;
+};
+
+type SalesFilterOptions = { departureTerminals: string[]; arrivalTerminals: string[] };
+
+function SalesSummaryReport() {
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo,   setDateTo]   = useState("");
+  const [departureTerminal, setDepartureTerminal] = useState("ALL");
+  const [arrivalTerminal,   setArrivalTerminal]   = useState("ALL");
+  const [filterOptions, setFilterOptions] = useState<SalesFilterOptions>({ departureTerminals: [], arrivalTerminals: [] });
+  const [data,    setData]    = useState<SalesTicketerRow[]>([]);
+  const [summary, setSummary] = useState<{ totalTicketers: number; trips: number; passengers: number; distanceKm: number; tariff: number; totalServiceCharge: number; totalCollected: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<SalesFilterOptions>("/api/sales/filter-options").then(setFilterOptions).catch(() => {});
+  }, []);
+
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const res = await apiFetch<{ data: SalesTicketerRow[]; summary: typeof summary }>(`/api/report?type=sales-summary&${qs({ dateFrom, dateTo, departureTerminal, arrivalTerminal })}`);
+      setData(res.data); setSummary(res.summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, [dateFrom, dateTo, departureTerminal, arrivalTerminal]);
+
+  const headers = ["Ticketer", "Trips", "Passengers", "Distance (km)", "Tariff", "Service Charge Collected", "Total Collected"];
+  const rows: (string | number)[][] = data.map(r => [
+    r.employeeName, r.trips, r.passengers, r.distanceKm.toFixed(1),
+    fmtCurrency(r.tariff), fmtCurrency(r.totalServiceCharge), fmtCurrency(r.totalCollected),
+  ]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+        <DateInput label="From date" value={dateFrom} onChange={setDateFrom} />
+        <DateInput label="To date"   value={dateTo}   onChange={setDateTo} />
+        <Select label="Departure station" value={departureTerminal} onChange={setDepartureTerminal}
+          options={[{ value: "ALL", label: "All stations" }, ...filterOptions.departureTerminals.map(t => ({ value: t, label: t }))]} />
+        <Select label="Arrival station" value={arrivalTerminal} onChange={setArrivalTerminal}
+          options={[{ value: "ALL", label: "All destinations" }, ...filterOptions.arrivalTerminals.map(t => ({ value: t, label: t }))]} />
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
+          <ExportBar
+            onCSV={() => exportCSV("sales-summary", headers, rows)}
+            onPDF={() => exportHTML("sales-summary", "Sales Summary — Earnings per Ticketer", headers, rows)}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
+        <SummaryChip label="Ticketers" value={summary?.totalTicketers ?? 0} color="#2563eb" />
+        <SummaryChip label="Trips" value={summary?.trips ?? 0} color="#7c3aed" />
+        <SummaryChip label="Passengers" value={summary?.passengers ?? 0} color="#0369a1" />
+        <SummaryChip label="Total collected" value={fmtCurrency(summary?.totalCollected ?? 0)} color="#16a34a" />
+      </div>
+
+      <ReportState loading={loading} error={error} onRetry={load} />
+      {!loading && !error && <Table headers={headers} rows={rows} emptyMsg="No sales trips match these filters." />}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -565,6 +642,7 @@ const REPORT_DEFS: { id: ReportId; label: string; description: string; icon: Rea
   { id: "staff-roster", label: "Staff Roster", description: "All employees across stations — role, salary, POS assignment", icon: <Users size={18} />, color: "#0369a1", lightColor: "#e0f2fe" },
   { id: "pos-fleet", label: "POS Fleet", description: "All POS machines — status, operator, app version, last assignment date", icon: <Monitor size={18} />, color: "#16a34a", lightColor: "#dcfce7" },
   { id: "station-summary", label: "Station Summary", description: "Per-station rollup of staff, machines, terminals, salary and petty cash", icon: <MapPin size={18} />, color: "#d97706", lightColor: "#fef3c7" },
+  { id: "sales-summary", label: "Sales Summary", description: "Earnings per ticketer, mirrored from the OTA ticketing system", icon: <TrendingUp size={18} />, color: "#16a34a", lightColor: "#dcfce7" },
 ];
 
 export default function ReportsPage() {
@@ -663,6 +741,7 @@ export default function ReportsPage() {
                   {activeId === "staff-roster" && <StaffRoster stations={stations} />}
                   {activeId === "pos-fleet" && <POSFleetReport stations={stations} />}
                   {activeId === "station-summary" && <StationSummaryReport stations={stations} />}
+                  {activeId === "sales-summary" && <SalesSummaryReport />}
                 </>
               )}
             </div>

@@ -1,9 +1,9 @@
 // src/app/api/sales/by-ticketer/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/generated/prisma/client";
 import { requirePermission } from "@/lib/api-auth";
 import { ok, serverError } from "@/lib/api-utils";
+import { buildSalesTripWhere } from "@/lib/ota/sales-filters";
 
 /**
  * GET /api/sales/by-ticketer
@@ -11,7 +11,9 @@ import { ok, serverError } from "@/lib/api-utils";
  * Accepts the same filters as /api/sales/trips (dateFrom/dateTo,
  * departureTerminal, arrivalTerminal, employeeId, plateNo, search) so the
  * Sales page's filter bar drives both views identically. Sorted by total
- * collected, highest first.
+ * collected, highest first. Already unpaginated — every matching ticketer
+ * row comes back in one response, so this doubles as the "By ticketer"
+ * view's own export source.
  */
 export async function GET(request: NextRequest) {
   const auth = await requirePermission(request, "sales", "view");
@@ -19,33 +21,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const dateFrom = searchParams.get("dateFrom")?.trim();
-    const dateTo = searchParams.get("dateTo")?.trim();
-    const departureTerminal = searchParams.get("departureTerminal")?.trim();
-    const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim();
-    const employeeExternalId = searchParams.get("employeeId")?.trim();
-    const plateNo = searchParams.get("plateNo")?.trim();
-    const search = searchParams.get("search")?.trim();
-
-    const where: Prisma.SalesTripWhereInput = { employeeExternalId: { not: null } };
-    if (dateFrom || dateTo) {
-      where.date = {
-        ...(dateFrom && { gte: new Date(dateFrom) }),
-        ...(dateTo && { lte: new Date(dateTo) }),
-      };
-    }
-    if (departureTerminal) where.departureTerminalName = departureTerminal;
-    if (arrivalTerminal) where.arrivalTerminalName = arrivalTerminal;
-    if (employeeExternalId) where.employeeExternalId = employeeExternalId;
-    if (plateNo) where.vehiclePlateNo = { contains: plateNo, mode: "insensitive" };
-    if (search) {
-      where.OR = [
-        { employeeName: { contains: search, mode: "insensitive" } },
-        { departureTerminalName: { contains: search, mode: "insensitive" } },
-        { arrivalTerminalName: { contains: search, mode: "insensitive" } },
-        { vehiclePlateNo: { contains: search, mode: "insensitive" } },
-      ];
-    }
+    const where = buildSalesTripWhere(searchParams);
+    // Exclude trips with no employee attached from the grouping — but only
+    // when the caller didn't already ask for one specific employeeId,
+    // otherwise this would silently widen the filter back out to everyone.
+    if (!where.employeeExternalId) where.employeeExternalId = { not: null };
 
     const grouped = await prisma.salesTrip.groupBy({
       by: ["employeeExternalId", "employeeName"],

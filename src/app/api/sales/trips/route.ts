@@ -1,9 +1,9 @@
 // src/app/api/sales/trips/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/generated/prisma/client";
 import { requirePermission } from "@/lib/api-auth";
 import { ok, parsePagination, serializeSalesTrip, serverError } from "@/lib/api-utils";
+import { buildSalesTripWhere } from "@/lib/ota/sales-filters";
 
 export async function GET(request: NextRequest) {
   const auth = await requirePermission(request, "sales", "view");
@@ -12,34 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const { offset, limit } = parsePagination(searchParams, 50, 500);
-
-    const dateFrom = searchParams.get("dateFrom")?.trim();
-    const dateTo = searchParams.get("dateTo")?.trim();
-    const departureTerminal = searchParams.get("departureTerminal")?.trim();
-    const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim();
-    const employeeExternalId = searchParams.get("employeeId")?.trim();
-    const plateNo = searchParams.get("plateNo")?.trim();
-    const search = searchParams.get("search")?.trim();
-
-    const where: Prisma.SalesTripWhereInput = {};
-    if (dateFrom || dateTo) {
-      where.date = {
-        ...(dateFrom && { gte: new Date(dateFrom) }),
-        ...(dateTo && { lte: new Date(dateTo) }),
-      };
-    }
-    if (departureTerminal) where.departureTerminalName = departureTerminal;
-    if (arrivalTerminal) where.arrivalTerminalName = arrivalTerminal;
-    if (employeeExternalId) where.employeeExternalId = employeeExternalId;
-    if (plateNo) where.vehiclePlateNo = { contains: plateNo, mode: "insensitive" };
-    if (search) {
-      where.OR = [
-        { employeeName: { contains: search, mode: "insensitive" } },
-        { departureTerminalName: { contains: search, mode: "insensitive" } },
-        { arrivalTerminalName: { contains: search, mode: "insensitive" } },
-        { vehiclePlateNo: { contains: search, mode: "insensitive" } },
-      ];
-    }
+    const where = buildSalesTripWhere(searchParams);
 
     const [trips, total, aggregate] = await Promise.all([
       // Newest first, down to the millisecond — the source can log several

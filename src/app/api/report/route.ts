@@ -3,12 +3,13 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api-auth";
 import { badRequest, ok, serverError } from "@/lib/api-utils";
+import { buildSalesTripWhere } from "@/lib/ota/sales-filters";
 
 /**
  * GET /api/reports
  *
  * Query params:
- *   type       — Required. One of: fare-summary | petty-cash-ledger | staff-roster | pos-fleet | station-summary
+ *   type       — Required. One of: fare-summary | petty-cash-ledger | staff-roster | pos-fleet | station-summary | sales-summary
  *
  * Per-report filters (all optional):
  *
@@ -26,6 +27,10 @@ import { badRequest, ok, serverError } from "@/lib/api-utils";
  *
  * station-summary:
  *   region
+ *
+ * sales-summary:
+ *   dateFrom, dateTo (YYYY-MM-DD), departureTerminal, arrivalTerminal, employeeId, plateNo
+ *   — mirrored from the OTA source (see src/lib/ota/*), earnings per ticketer
  */
 export async function GET(request: NextRequest) {
   const auth = await requirePermission(request, "reports", "view");
@@ -46,10 +51,12 @@ export async function GET(request: NextRequest) {
         return posFleet(searchParams);
       case "station-summary":
         return stationSummary(searchParams);
+      case "sales-summary":
+        return salesSummary(searchParams);
       default:
         return badRequest(
           "Missing or invalid `type` parameter.",
-          { valid: ["fare-summary", "petty-cash-ledger", "staff-roster", "pos-fleet", "station-summary"] }
+          { valid: ["fare-summary", "petty-cash-ledger", "staff-roster", "pos-fleet", "station-summary", "sales-summary"] }
         );
     }
   } catch (error) {
@@ -473,6 +480,63 @@ async function stationSummary(params: URLSearchParams) {
       totalTerminals: data.reduce((s, d) => s + d.terminalCount, 0),
       grandMonthlySalary: grandSalary,
       grandPettyCash,
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REPORT: Sales Summary
+// Earnings per ticketer, mirrored from the OTA source system (see
+// src/lib/ota/*) — same filters and grouping as /api/sales/by-ticketer,
+// surfaced here so it sits alongside the rest of the cross-entity reports.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function salesSummary(params: URLSearchParams) {
+  const where = buildSalesTripWhere(params);
+  if (!where.employeeExternalId) where.employeeExternalId = { not: null };
+
+  const grouped = await prisma.salesTrip.groupBy({
+    by: ["employeeExternalId", "employeeName"],
+    where,
+    _count: { _all: true },
+    _sum: { tariff: true, totalServiceCharge: true, distanceKm: true, passengers: true },
+  });
+
+  const rows = grouped
+    .map((g) => {
+      const tariff = g._sum.tariff?.toNumber() ?? 0;
+      const totalServiceCharge = g._sum.totalServiceCharge?.toNumber() ?? 0;
+      return {
+        employeeId: g.employeeExternalId as string,
+        employeeName: g.employeeName ?? "Unknown",
+        trips: g._count._all,
+        passengers: g._sum.passengers ?? 0,
+        distanceKm: g._sum.distanceKm?.toNumber() ?? 0,
+        tariff,
+        totalServiceCharge,
+        totalCollected: tariff + totalServiceCharge,
+      };
+    })
+    .sort((a, b) => b.totalCollected - a.totalCollected);
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      trips: acc.trips + r.trips,
+      passengers: acc.passengers + r.passengers,
+      distanceKm: acc.distanceKm + r.distanceKm,
+      tariff: acc.tariff + r.tariff,
+      totalServiceCharge: acc.totalServiceCharge + r.totalServiceCharge,
+      totalCollected: acc.totalCollected + r.totalCollected,
+    }),
+    { trips: 0, passengers: 0, distanceKm: 0, tariff: 0, totalServiceCharge: 0, totalCollected: 0 }
+  );
+
+  return ok({
+    type: "sales-summary",
+    data: rows,
+    summary: {
+      totalTicketers: rows.length,
+      ...totals,
     },
   });
 }

@@ -5,6 +5,7 @@ import {
   TrendingUp, RefreshCw, Check, AlertCircle, History,
   MapPin, User, Truck, ChevronLeft, ChevronRight, ChevronDown, Loader2,
   Route as RouteIcon, Users as UsersIcon, Gauge, Wallet, Coins, X, Calendar,
+  FileSpreadsheet, Printer,
 } from "lucide-react";
 import {
   ETHIOPIAN_MONTH_NAMES, dateToEthiopian, ethiopianToGregorian,
@@ -164,6 +165,51 @@ function progressLine(e: SyncProgressEvent): string {
   }
 }
 
+// ─── Export — client-side, no extra deps (same pattern as the Reports page).
+// CSV opens fine in Excel directly, so one file covers both; "PDF" is a
+// print-ready HTML doc opened in a new tab with window.print() fired
+// automatically, so the browser's own "Save as PDF" covers PDF and Print
+// with the same code path. ──────────────────────────────────────────────
+
+function exportCSV(filename: string, headers: string[], rows: (string | number)[][]) {
+  const csv = [headers, ...rows]
+    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = filename + ".csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportHTML(filename: string, title: string, subtitle: string, headers: string[], rows: (string | number)[][]) {
+  const rowsHtml = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("");
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>${title}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 32px; color: #0f172a; }
+      h1 { font-size: 20px; margin-bottom: 4px; }
+      p.meta { font-size: 12px; color: #64748b; margin-bottom: 24px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th { background: #1d4ed8; color: #fff; padding: 8px 10px; text-align: left; font-weight: 600; white-space: nowrap; }
+      td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+      tr:nth-child(even) td { background: #f8fafc; }
+      @media print { body { padding: 16px; } }
+    </style>
+  </head><body>
+    <h1>${title}</h1>
+    <p class="meta">OroDashboard · Generated ${new Date().toLocaleString("en-GB")} · ${subtitle}</p>
+    <table>
+      <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </body></html>`;
+  const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const w    = window.open(url, "_blank");
+  if (w) setTimeout(() => w.print(), 600);
+}
+
 const iCss: React.CSSProperties = {
   height: 38, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 9,
   background: "var(--surface)", color: "var(--foreground)", fontSize: 13, outline: "none",
@@ -267,6 +313,7 @@ export default function SalesPage() {
   const [syncProgressFrac, setSyncProgressFrac] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
 
   const [logs, setLogs] = useState<SalesSyncLog[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -496,6 +543,54 @@ export default function SalesPage() {
   }
   const filtersActive = !!(dateFrom || dateTo || departureTerminal || arrivalTerminal || employeeId || plateNo || search);
 
+  // Printing (and its "Save as PDF") happens in an actual browser tab, so it
+  // needs a sane cap — CSV has none, since "no filter = everything" applies
+  // there regardless of size.
+  const MAX_PRINT_ROWS = 3000;
+
+  async function handleExport(format: "csv" | "pdf") {
+    const rowCountKnown = view === "trips" ? total : byTicketer.length;
+    if (format === "pdf" && rowCountKnown > MAX_PRINT_ROWS) {
+      setToast(`${rowCountKnown.toLocaleString()} rows is too many to print at once — narrow your filters first, or use CSV instead.`);
+      return;
+    }
+
+    setExporting(format);
+    try {
+      const label = filtersActive ? "Filtered" : "All";
+      const stamp = new Date().toISOString().slice(0, 10);
+
+      if (view === "by-ticketer") {
+        const headers = ["Ticketer", "Trips", "Passengers", "Distance (km)", "Tariff", "Service charge collected", "Total collected"];
+        const rows: (string | number)[][] = byTicketer.map(r => [
+          r.employeeName, r.trips, r.passengers, r.distanceKm.toFixed(1),
+          fmtMoney(r.tariff), fmtMoney(r.totalServiceCharge), fmtMoney(r.totalCollected),
+        ]);
+        if (format === "csv") exportCSV(`sales-by-ticketer-${stamp}`, headers, rows);
+        else exportHTML(`sales-by-ticketer-${stamp}`, "Sales — By Ticketer", `${label} · ${rows.length.toLocaleString()} ticketers`, headers, rows);
+        return;
+      }
+
+      // Trips view — every matching row, not just the current page.
+      const res = await apiFetch<{ data: SalesTrip[]; truncated: boolean }>(`/api/sales/trips/export?${buildFilterParams().toString()}`);
+      if (res.truncated) setToast(`Export capped at ${res.data.length.toLocaleString()} rows — narrow your filters to get everything.`);
+
+      const headers = ["Date (Gregorian)", "Date (Ethiopian E.C.)", "Departure", "Arrival", "Ticketer", "Vehicle plate", "Level", "Distance (km)", "Tariff", "Service charge/pax", "Service charge total", "Passengers"];
+      const rows: (string | number)[][] = res.data.map(t => [
+        fmtDateTimeMs(t.date), ethiopianDayLabel(t.date.slice(0, 10)),
+        t.departureTerminalName, t.arrivalTerminalName,
+        t.employee?.name ?? "—", t.vehicle?.plateNo ?? "—", t.level,
+        t.distanceKm.toFixed(1), fmtMoney(t.tariff), fmtMoney(t.serviceCharge), fmtMoney(t.totalServiceCharge), t.passengers,
+      ]);
+      if (format === "csv") exportCSV(`sales-trips-${stamp}`, headers, rows);
+      else exportHTML(`sales-trips-${stamp}`, "Sales — Trips", `${label} · ${rows.length.toLocaleString()} trips`, headers, rows);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   const latestLog = logs[0] ?? null;
   const completenessGap = latestLog?.sourceTotal != null && latestLog?.ourTotal != null ? latestLog.sourceTotal - latestLog.ourTotal : null;
 
@@ -675,21 +770,39 @@ export default function SalesPage() {
           </div>
         )}
 
-        {/* View toggle */}
-        <div style={{ display: "flex", gap: 2, marginBottom: 14, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 3, width: "fit-content" }}>
-          {([["trips", "Trips"], ["by-ticketer", "By ticketer"]] as const).map(([id, label]) => {
-            const active = view === id;
-            return (
-              <button key={id} onClick={() => setView(id)} style={{
-                height: 34, padding: "0 16px", borderRadius: 7, border: "none",
-                background: active ? "var(--primary)" : "transparent",
-                color: active ? "#fff" : "var(--muted-foreground)",
-                fontSize: 13, fontWeight: active ? 700 : 500, cursor: "pointer",
-              }}>
-                {label}
+        {/* View toggle + export */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div style={{ display: "flex", gap: 2, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 3, width: "fit-content" }}>
+            {([["trips", "Trips"], ["by-ticketer", "By ticketer"]] as const).map(([id, label]) => {
+              const active = view === id;
+              return (
+                <button key={id} onClick={() => setView(id)} style={{
+                  height: 34, padding: "0 16px", borderRadius: 7, border: "none",
+                  background: active ? "var(--primary)" : "transparent",
+                  color: active ? "#fff" : "var(--muted-foreground)",
+                  fontSize: 13, fontWeight: active ? 700 : 500, cursor: "pointer",
+                }}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+              Export {filtersActive ? "filtered data" : "everything"}:
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => handleExport("csv")} disabled={exporting !== null} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, fontWeight: 600, cursor: exporting ? "default" : "pointer", opacity: exporting && exporting !== "csv" ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6, color: "#16a34a" }}>
+                {exporting === "csv" ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <FileSpreadsheet size={14} />}
+                Excel / CSV
               </button>
-            );
-          })}
+              <button onClick={() => handleExport("pdf")} disabled={exporting !== null} style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, fontWeight: 600, cursor: exporting ? "default" : "pointer", opacity: exporting && exporting !== "pdf" ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6, color: "#dc2626" }}>
+                {exporting === "pdf" ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Printer size={14} />}
+                PDF / Print
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* By-ticketer earnings table */}

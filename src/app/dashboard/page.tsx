@@ -230,6 +230,7 @@ export default function DashboardPage() {
   const [staffSummary, setStaffSummary] = useState<StaffSummary | null>(null);
   const [pettyCashRows, setPettyCashRows] = useState<PettyCashRow[]>([]);
   const [pettyCashSummary, setPettyCashSummary] = useState<PettyCashSummary | null>(null);
+  const [salesSummary, setSalesSummary] = useState<{ trips: number; tariff: number; totalServiceCharge: number; distanceKm: number; passengers: number } | null>(null);
 
   async function load() {
     setLoading(true); setError(null);
@@ -251,6 +252,16 @@ export default function DashboardPage() {
       setError(e instanceof Error ? e.message : "Failed to load dashboard data.");
     } finally {
       setLoading(false);
+    }
+
+    // Sales is its own permission page and may be empty/unavailable to some
+    // admins — kept out of the main try/catch so it can't put a red error
+    // banner across the whole dashboard on its own.
+    try {
+      const res = await apiFetch<{ meta: { total: number }; totals: { tariff: number; totalServiceCharge: number; distanceKm: number; passengers: number } }>("/api/sales/trips?limit=1");
+      setSalesSummary({ trips: res.meta.total, ...res.totals });
+    } catch {
+      setSalesSummary(null);
     }
   }
 
@@ -414,6 +425,19 @@ export default function DashboardPage() {
           <StatCard icon={<Monitor size={18} />}  label="POS Machines"   value={posSummary.total}        sub={`${posSummary.byStatus.ACTIVE} active · ${posSummary.byStatus.IDLE} idle`} color="#16a34a" lightColor="#dcfce7" />
           <StatCard icon={<Banknote size={18} />} label="Monthly Salary" value={`${fmtCurrency(staffSummary.totalSalary)} ETB`} sub={`${staffSummary.totalEmployees} employees`} color="#d97706" lightColor="#fef3c7" />
         </div>
+
+        {/* ── SALES STRIP — mirrored from the OTA ticketing system ── */}
+        {salesSummary && (
+          <div style={{ marginBottom: 28 }}>
+            <SectionHeader title="Sales" sub="Mirrored from the OTA ticketing system" action={<NavLink href="/dashboard/sales" label="Full sales report" />} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
+              <StatCard icon={<TrendingUp size={18} />} label="Trips" value={salesSummary.trips.toLocaleString()} sub="All time on file" color="#2563eb" lightColor="#dbeafe" />
+              <StatCard icon={<Users size={18} />} label="Passengers" value={salesSummary.passengers.toLocaleString()} sub={`${fmtCurrency(salesSummary.distanceKm)} km covered`} color="#7c3aed" lightColor="#ede9fe" />
+              <StatCard icon={<Wallet size={18} />} label="Tariff Revenue" value={`${fmtCurrency(salesSummary.tariff)} ETB`} sub="Ticket fares" color="#0369a1" lightColor="#e0f2fe" />
+              <StatCard icon={<Banknote size={18} />} label="Total Collected" value={`${fmtCurrency(salesSummary.tariff + salesSummary.totalServiceCharge)} ETB`} sub="Tariff + service charge" color="#16a34a" lightColor="#dcfce7" />
+            </div>
+          </div>
+        )}
 
         {/* ── ROW 2: Financial + Staff + Fleet ── */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 28 }}>
