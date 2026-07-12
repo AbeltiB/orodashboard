@@ -4,6 +4,7 @@ import {
   Building2,
   Users,
   CreditCard,
+  CalendarClock,
   FileBarChart,
   Settings,
   DollarSign
@@ -38,6 +39,11 @@ export const navigation = [
     title: "POS Machines",
     href: "/dashboard/pos-machines",
     icon: CreditCard,
+  },
+  {
+    title: "Shifts",
+    href: "/dashboard/shifts",
+    icon: CalendarClock,
   },
   {
     title: "Fare Matrix",

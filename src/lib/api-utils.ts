@@ -1,5 +1,5 @@
 // src/lib/api-utils.ts
-import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone, type PosSession } from "@/generated/prisma/client";
+import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone, type PosSession, type ShiftAssignment, type ShiftImportBatch } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,6 +33,7 @@ export const EMPLOYEE_ROLE_VALUES = ["SUPERVISOR", "TICKETER", "CASHIER"] as con
 export const SEX_VALUES = ["MALE", "FEMALE"] as const;
 export const POS_STATUS_VALUES = ["ACTIVE", "IDLE", "MAINTENANCE", "DECOMMISSIONED"] as const;
 export const DELIVERY_METHOD_VALUES = ["BANK_TRANSFER", "CHEQUE", "TELEBIRR", "OTHER"] as const;
+export const SHIFT_TYPE_VALUES = ["MORNING", "AFTERNOON"] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type coercion
@@ -292,6 +293,53 @@ export function serializePosSession(s: PosSessionWithEmployee) {
     endedAt: s.endedAt,
     note: s.note,
     loggedBy: s.loggedBy,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shift schedule
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ShiftAssignmentWithRelations = ShiftAssignment & {
+  employee?: { id: string; code: string; firstName: string; lastName: string } | null;
+  station?: { id: string; name: string; code: string } | null;
+  posMachine?: { id: string; code: string; serial: string } | null;
+};
+
+export function serializeShiftAssignment(sa: ShiftAssignmentWithRelations) {
+  return {
+    id: sa.id,
+    employeeId: sa.employeeId,
+    employee: sa.employee
+      ? { id: sa.employee.id, code: sa.employee.code, name: `${sa.employee.firstName} ${sa.employee.lastName}` }
+      : null,
+    stationId: sa.stationId,
+    station: sa.station ?? null,
+    date: sa.date,
+    shiftType: sa.shiftType,
+    role: sa.role,
+    posMachineId: sa.posMachineId,
+    posMachine: sa.posMachine ?? null,
+    source: sa.source,
+    externalRef: sa.externalRef,
+    importBatchId: sa.importBatchId,
+    isDeleted: sa.isDeleted,
+    deletedAt: sa.deletedAt,
+    createdAt: sa.createdAt,
+    updatedAt: sa.updatedAt,
+  };
+}
+
+export function serializeShiftImportBatch(b: ShiftImportBatch) {
+  return {
+    id: b.id,
+    fileName: b.fileName,
+    importedBy: b.importedBy,
+    rowCount: b.rowCount,
+    successCount: b.successCount,
+    errorCount: b.errorCount,
+    errors: b.errors,
+    createdAt: b.createdAt,
   };
 }
 
