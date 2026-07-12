@@ -24,6 +24,7 @@ const stationInclude = {
     include: { linkedStation: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   },
+  zone: { select: { id: true, name: true, region: true } },
   _count: {
     select: {
       terminalsAsOrigin: { where: { isDeleted: false } },
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
     const includeDeleted = parseIncludeDeleted(searchParams);
     const search = searchParams.get("search")?.trim();
     const region = searchParams.get("region")?.trim();
+    const zoneId = searchParams.get("zoneId")?.trim();
     const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10) || 0);
     const limit = Math.min(
       MAX_LIMIT,
@@ -58,11 +60,15 @@ export async function GET(request: NextRequest) {
       where.region = region as $Enums.Region;
     }
 
+    if (zoneId) {
+      where.zoneId = zoneId === "NONE" ? null : zoneId;
+    }
+
     if (search) {
       where.OR = [
         { name: { contains: search, mode: "insensitive" } },
         { code: { contains: search, mode: "insensitive" } },
-        { zone: { contains: search, mode: "insensitive" } },
+        { zone: { name: { contains: search, mode: "insensitive" } } },
         { location: { contains: search, mode: "insensitive" } },
       ];
     }
@@ -104,7 +110,7 @@ export async function POST(request: NextRequest) {
       return badRequest("Invalid request body.", parsed.error.flatten());
     }
 
-    const { name, region, zone, location, terminals = [] } = parsed.data;
+    const { name, region, zoneId, location, terminals = [] } = parsed.data;
     const code = await generateStationCode();
 
     const station = await prisma.station.create({
@@ -112,7 +118,7 @@ export async function POST(request: NextRequest) {
         code,
         name,
         region,
-        zone,
+        zoneId: zoneId ?? null,
         location,
         terminalsAsOrigin: {
           create: terminals.map((t) => terminalInputToPrisma(t)),

@@ -426,6 +426,7 @@ async function stationSummary(params: URLSearchParams) {
         where: { isDeleted: false },
         select: { status: true },
       },
+      zone: { select: { name: true } },
     },
     orderBy: [{ region: "asc" }, { name: "asc" }],
   });
@@ -446,7 +447,7 @@ async function stationSummary(params: URLSearchParams) {
       code: s.code,
       name: s.name,
       region: s.region,
-      zone: s.zone,
+      zone: s.zone?.name ?? null,
       location: s.location,
       terminalCount: s._count.terminalsAsOrigin,
       employeeCount: s._count.employees,

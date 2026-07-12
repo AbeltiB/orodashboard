@@ -1,5 +1,5 @@
 // src/lib/api-utils.ts
-import { $Enums, type Terminal, type Station, type Employee, type PosMachine } from "@/generated/prisma/client";
+import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +142,7 @@ export function serializeTerminal(terminal: TerminalWithLinkedStation) {
 
 type StationWithCounts = Station & {
   terminalsAsOrigin: TerminalWithLinkedStation[];
+  zone?: { id: string; name: string; region: $Enums.Region } | null;
   _count?: {
     terminalsAsOrigin: number;
     employees: number;
@@ -155,7 +156,8 @@ export function serializeStation(station: StationWithCounts) {
     code: station.code,
     name: station.name,
     region: station.region,
-    zone: station.zone,
+    zoneId: station.zoneId,
+    zone: station.zone ?? null,
     location: station.location,
     isDeleted: station.isDeleted,
     deletedAt: station.deletedAt,
@@ -167,6 +169,39 @@ export function serializeStation(station: StationWithCounts) {
       employees: 0,
       posMachines: 0,
     },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ZoneWithSupervisors = Zone & {
+  supervisors?: {
+    employeeId: string;
+    assignedAt: Date;
+    employee: { id: string; firstName: string; lastName: string; code: string };
+  }[];
+  _count?: { stations: number };
+};
+
+export function serializeZone(zone: ZoneWithSupervisors) {
+  return {
+    id: zone.id,
+    region: zone.region,
+    name: zone.name,
+    description: zone.description,
+    isDeleted: zone.isDeleted,
+    deletedAt: zone.deletedAt,
+    createdAt: zone.createdAt,
+    updatedAt: zone.updatedAt,
+    stationCount: zone._count?.stations ?? 0,
+    supervisors: (zone.supervisors ?? []).map((s) => ({
+      employeeId: s.employeeId,
+      assignedAt: s.assignedAt,
+      name: `${s.employee.firstName} ${s.employee.lastName}`,
+      employeeCode: s.employee.code,
+    })),
   };
 }
 

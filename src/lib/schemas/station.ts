@@ -5,7 +5,7 @@ import { terminalInputSchema } from "./terminal";
 export const stationBaseSchema = z.object({
   name: z.string().min(1).max(255),
   region: z.enum(REGION_VALUES),
-  zone: z.string().min(1).max(255),
+  zoneId: z.string().cuid().nullable().optional(),
   location: z.string().min(1).max(500),
 });
 

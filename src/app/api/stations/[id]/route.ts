@@ -24,6 +24,7 @@ const stationInclude = {
     include: { linkedStation: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   },
+  zone: { select: { id: true, name: true, region: true } },
   _count: {
     select: {
       terminalsAsOrigin: { where: { isDeleted: false } },
@@ -65,7 +66,7 @@ export async function PATCH(request: NextRequest, context: StationContext) {
       return badRequest("Invalid request body.", parsed.error.flatten());
     }
 
-    const { name, region, zone, location, terminals } = parsed.data;
+    const { name, region, zoneId, location, terminals } = parsed.data;
 
     const existing = await prisma.station.findUnique({
       where: { id },
@@ -111,7 +112,7 @@ export async function PATCH(request: NextRequest, context: StationContext) {
         data: {
           ...(name !== undefined && { name }),
           ...(region !== undefined && { region }),
-          ...(zone !== undefined && { zone }),
+          ...(zoneId !== undefined && { zoneId }),
           ...(location !== undefined && { location }),
         },
         include: stationInclude,
