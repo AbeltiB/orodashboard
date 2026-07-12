@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);j.data.forEach\\(s=>console.log\\(s.id\\)\\)}\\)\")",
+      "Bash(curl -s -b /tmp/cookies5.txt -X DELETE \"http://localhost:3000/api/shifts/cmrhs0qp00002jku8j33jcc23\")",
+      "Bash(curl -s -b /tmp/cookies5.txt -X DELETE \"http://localhost:3000/api/shifts/cmrhs0qvn0003jku8yyqcrbyb\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>console.log\\('active:', JSON.parse\\(d\\).meta.total\\)\\)\")",
+      "PowerShell(Stop-Process -Force -Confirm:$false)",
+      "Bash(git commit -m ' *)",
+      "Bash(grep -iE \"error|fail\" /tmp/dev6.log | grep -v \"prisma:query\")",
+      "Read(//tmp/**)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s -b /tmp/cookies6.txt -X POST http://localhost:3000/api/shifts/import -H \"Content-Type: application/json\" -d @/tmp/shift_import2.json)",
+      "Bash(curl -s -b /tmp/cookies6.txt \"http://localhost:3000/api/shifts\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\(j.data\\)}\\)\")",
+      "Bash(curl -s -b /tmp/cookies6.txt -X DELETE \"http://localhost:3000/api/shifts/cmrhs0qp00002jku8j33jcc23\")",
+      "Bash(curl -s -o /dev/null -w \"dashboard home: %{http_code}\\\\n\" -b /tmp/cookies7.txt --max-time 90 \"http://localhost:3000/dashboard\")",
+      "Bash(grep -iE \"error|fail\" /tmp/dev7.log | grep -v \"prisma:query\")",
+      "Bash(curl -s -b /tmp/cookies7.txt \"http://localhost:3000/api/report?type=station-summary\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\); console.log\\(JSON.stringify\\(j\\).slice\\(0,500\\)\\)}\\)\")",
+      "Bash(curl -s -b /tmp/cookies7.txt \"http://localhost:3000/api/zones\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\(j.data?.map\\(z=>\\({id:z.id,region:z.region,name:z.name,stationCount:z.stationCount}\\)\\) ?? j\\)}\\)\")",
+      "Bash(curl -s -b /tmp/cookies7.txt -X DELETE \"http://localhost:3000/api/zones/cmrhn7htb0001x0u8p00pzqhl\")",
+      "Bash(curl -s -b /tmp/cookies7.txt \"http://localhost:3000/api/stations?limit=3\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\(j.data.map\\(s=>\\({name:s.name,zone:s.zone}\\)\\)\\)}\\)\")",
+      "Bash(curl -s -b /tmp/cookies7.txt \"http://localhost:3000/api/employees?limit=3\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\(j.meta\\)}\\)\")",
+      "Bash(curl -s -b /tmp/cookies7.txt \"http://localhost:3000/api/pos-machines\")",
+      "Bash(curl -s -b /tmp/cookies7.txt \"http://localhost:3000/api/shifts\")"
+    ]
+  }
+}
