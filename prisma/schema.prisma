@@ -562,6 +562,9 @@ enum SyncStatus {
   SUCCESS
   FAILED
   PARTIAL
+  SKIPPED       // no-op: either a walk was already in progress, or the source's
+                // own row count hadn't changed since the last full walk
+  RATE_LIMITED  // the source's own API throttled us (HTTP 429) — see rateLimitedUntil
 }
 
 model SalesTrip {
@@ -613,15 +616,33 @@ model SalesSyncLog {
   source        SyncSource
   triggeredBy   String?    // AdminUser id when source = MANUAL, null for AUTO
 
-  windowFrom    DateTime?  // null = full backfill (no lower bound)
+  // Every run walks the source's full, unfiltered table (its own pagination
+  // has been observed to skip/duplicate rows across pages while its table
+  // is being written to, so date-range filtering isn't trusted here) —
+  // these two are informational only, not query params: "where our data
+  // stood right before this run started."
+  windowFrom    DateTime?
   windowTo      DateTime
 
   status        SyncStatus @default(SUCCESS)
+  passes        Int        @default(0) // how many full-table walks this run needed to converge (or gave up after)
   pagesFetched  Int        @default(0)
   rowsFetched   Int        @default(0)
   rowsCreated   Int        @default(0)
   rowsUpdated   Int        @default(0)
   errorMessage  String?
+
+  // Completeness check: the source's own reported total vs. ours, both
+  // read right after this run finished — lets you see at a glance whether
+  // we're fully caught up. Null when the run was skipped before either
+  // could be measured.
+  sourceTotal   Int?
+  ourTotal      Int?
+
+  // Set when this run hit HTTP 429 from the source — later runs check this
+  // (on the most recent log row) and skip outright until it's passed,
+  // instead of immediately re-tripping the same limiter.
+  rateLimitedUntil DateTime?
 
   startedAt     DateTime   @default(now())
   finishedAt    DateTime?

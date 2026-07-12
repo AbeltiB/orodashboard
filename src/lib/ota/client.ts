@@ -66,6 +66,18 @@ type OtaTripsResponse = {
   pagination?: { total?: number; pages?: number };
 };
 
+// Thrown when the source API responds 429. Confirmed live: it returns
+// { retryAfter: <seconds> } in the body (900 = 15 minutes) on top of the
+// standard Retry-After header — both are checked, body wins if present.
+export class OtaRateLimitError extends Error {
+  retryAfterSeconds: number;
+  constructor(retryAfterSeconds: number) {
+    super(`OTA rate limit hit — retry after ${retryAfterSeconds}s.`);
+    this.name = "OtaRateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export async function otaLogin(config: OtaConfig): Promise<{ token: string; fullName: string }> {
   const res = await fetch(`${config.baseUrl}/api/auth/company-user/login`, {
     method: "POST",
@@ -100,6 +112,12 @@ export async function fetchOtaTripsPage(
   if (window.to) url.searchParams.set("to", window.to.toISOString());
 
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 429) {
+    const body = await res.json().catch(() => ({}) as { retryAfter?: number });
+    const headerRetry = Number(res.headers.get("Retry-After"));
+    const retryAfterSeconds = body.retryAfter ?? (Number.isFinite(headerRetry) ? headerRetry : 900);
+    throw new OtaRateLimitError(retryAfterSeconds);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`OTA trips page ${page} failed (HTTP ${res.status}): ${text.slice(0, 300)}`);

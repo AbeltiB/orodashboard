@@ -7,6 +7,7 @@ import {
   Banknote, ShieldAlert, Zap, BarChart3, RefreshCw,
   CheckCircle2,
 } from "lucide-react";
+import { dateToEthiopian, dateToEthiopianTime, formatEthiopianDate, formatEthiopianTime } from "@/lib/ethiopian-calendar";
 
 // ─── Types (mirror the /api/report response shapes we use) ───────────────────
 
@@ -57,9 +58,11 @@ type StationSummaryTotals = { totalStations: number };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const TODAY = new Date();
 function fmtDate(d: Date) {
   return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+function fmtTime(d: Date) {
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 function fmtCurrency(n: number) {
   return n.toLocaleString("en-ET", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -212,6 +215,13 @@ export default function DashboardPage() {
   const [alertsExpanded, setAlertsExpanded] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const [stations,  setStations]  = useState<StationRow[]>([]);
   const [posRows,    setPosRows]    = useState<PosRow[]>([]);
@@ -330,10 +340,17 @@ export default function DashboardPage() {
               OroDashboard
             </p>
             <h1 style={{ fontSize: 26, fontWeight: 800, color: "var(--foreground)", margin: 0 }}>Operations Dashboard</h1>
-            <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "5px 0 0", display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#16a34a", display: "inline-block", animation: "pulse 2s infinite" }} />
-              {fmtDate(TODAY)}
-            </p>
+            {now && (
+              <>
+                <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "5px 0 0", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#16a34a", display: "inline-block", animation: "pulse 2s infinite" }} />
+                  {fmtDate(now)} · {fmtTime(now)}
+                </p>
+                <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: "3px 0 0 15px" }}>
+                  {formatEthiopianDate(dateToEthiopian(now))} (E.C.) · {formatEthiopianTime(dateToEthiopianTime(now))}
+                </p>
+              </>
+            )}
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <a href="/dashboard/reports" style={{ height: 38, padding: "0 16px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 13, fontWeight: 600, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>

@@ -5,11 +5,12 @@ import {
   TrendingUp, RefreshCw, Check, AlertCircle, History,
   MapPin, User, Truck, ChevronLeft, ChevronRight, Loader2,
 } from "lucide-react";
+import { dateToEthiopian, formatEthiopianDate } from "@/lib/ethiopian-calendar";
 
 // ─── Types matching the sales API ──────────────────────────────────────────────
 
 type SyncSource = "MANUAL" | "AUTO";
-type SyncStatus = "SUCCESS" | "FAILED" | "PARTIAL";
+type SyncStatus = "SUCCESS" | "FAILED" | "PARTIAL" | "SKIPPED" | "RATE_LIMITED";
 
 type SalesTrip = {
   id: string;
@@ -32,10 +33,14 @@ type SalesSyncLog = {
   windowFrom: string | null;
   windowTo: string;
   status: SyncStatus;
+  passes: number;
   pagesFetched: number;
   rowsFetched: number;
   rowsCreated: number;
   rowsUpdated: number;
+  sourceTotal: number | null;
+  ourTotal: number | null;
+  rateLimitedUntil: string | null;
   errorMessage: string | null;
   startedAt: string;
   finishedAt: string | null;
@@ -57,7 +62,11 @@ function fmtMoney(n: number) {
   return n.toLocaleString("en-ET", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function statusStyle(s: SyncStatus): { bg: string; fg: string } {
-  return s === "SUCCESS" ? { bg: "#dcfce7", fg: "#16a34a" } : s === "PARTIAL" ? { bg: "#fef3c7", fg: "#d97706" } : { bg: "#fee2e2", fg: "#dc2626" };
+  if (s === "SUCCESS") return { bg: "#dcfce7", fg: "#16a34a" };
+  if (s === "PARTIAL") return { bg: "#fef3c7", fg: "#d97706" };
+  if (s === "SKIPPED") return { bg: "#f1f5f9", fg: "#64748b" };
+  if (s === "RATE_LIMITED") return { bg: "#ede9fe", fg: "#7c3aed" };
+  return { bg: "#fee2e2", fg: "#dc2626" };
 }
 
 const iCss: React.CSSProperties = {
@@ -134,8 +143,20 @@ export default function SalesPage() {
   async function handleSync() {
     setSyncing(true);
     try {
-      const res = await apiFetch<{ status: SyncStatus; rowsFetched: number; rowsCreated: number; rowsUpdated: number; pagesFetched: number }>("/api/sales/sync", { method: "POST" });
-      setToast(`Synced: ${res.rowsCreated} new, ${res.rowsUpdated} updated (${res.rowsFetched} rows across ${res.pagesFetched} page${res.pagesFetched === 1 ? "" : "s"})`);
+      const res = await apiFetch<{ status: SyncStatus; passes: number; rowsFetched: number; rowsCreated: number; rowsUpdated: number; pagesFetched: number; sourceTotal: number | null; ourTotal: number | null; errorMessage: string | null }>("/api/sales/sync", { method: "POST" });
+      if (res.status === "RATE_LIMITED") {
+        setToast(`Rate limited by the source — will retry automatically once the cooldown passes.`);
+      } else if (res.status === "SKIPPED" && res.errorMessage) {
+        setToast(res.errorMessage);
+      } else if (res.status === "SKIPPED") {
+        setToast(`Already up to date — ${res.ourTotal?.toLocaleString() ?? "?"} trips, nothing new on the source.`);
+      } else {
+        const gap = res.sourceTotal !== null && res.ourTotal !== null ? res.sourceTotal - res.ourTotal : null;
+        setToast(
+          `Synced: ${res.rowsCreated} new, ${res.rowsUpdated} already known (${res.passes} pass${res.passes === 1 ? "" : "es"}, ${res.pagesFetched} page${res.pagesFetched === 1 ? "" : "s"})` +
+          (gap !== null ? gap === 0 ? " — fully caught up" : ` — still ${gap} behind the source, will retry next sync` : "")
+        );
+      }
       setOffset(0);
       await Promise.all([loadTrips(), loadLogs()]);
     } catch (e) {
@@ -144,6 +165,9 @@ export default function SalesPage() {
       setSyncing(false);
     }
   }
+
+  const latestLog = logs[0] ?? null;
+  const completenessGap = latestLog?.sourceTotal != null && latestLog?.ourTotal != null ? latestLog.sourceTotal - latestLog.ourTotal : null;
 
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -174,6 +198,23 @@ export default function SalesPage() {
           </div>
         </div>
 
+        {/* Completeness banner — driven by the most recent sync's own count comparison */}
+        {latestLog && completenessGap !== null && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, marginBottom: 14,
+            background: completenessGap === 0 ? "#dcfce7" : "#fef3c7",
+          }}>
+            {completenessGap === 0
+              ? <Check size={15} color="#16a34a" />
+              : <AlertCircle size={15} color="#d97706" />}
+            <span style={{ fontSize: 13, color: completenessGap === 0 ? "#16a34a" : "#d97706", fontWeight: 500 }}>
+              {completenessGap === 0
+                ? `Fully in sync — ${latestLog.ourTotal?.toLocaleString()} trips match the source exactly.`
+                : `${completenessGap} trip${completenessGap === 1 ? "" : "s"} behind the source (${latestLog.ourTotal?.toLocaleString()} of ${latestLog.sourceTotal?.toLocaleString()}) — next sync will close the gap.`}
+            </span>
+          </div>
+        )}
+
         {/* Sync history panel */}
         {showHistory && (
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 18 }}>
@@ -188,7 +229,12 @@ export default function SalesPage() {
                     <Badge label={l.source === "MANUAL" ? "Manual" : "Auto"} bg={l.source === "MANUAL" ? "#dbeafe" : "#ede9fe"} fg={l.source === "MANUAL" ? "#1d4ed8" : "#7c3aed"} />
                     <Badge label={l.status} bg={ss.bg} fg={ss.fg} />
                     <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{fmtDateTime(l.startedAt)}</span>
-                    <span style={{ fontSize: 12, color: "var(--foreground)" }}>{l.rowsFetched} fetched · {l.rowsCreated} new · {l.rowsUpdated} updated · {l.pagesFetched} page{l.pagesFetched === 1 ? "" : "s"}</span>
+                    <span style={{ fontSize: 12, color: "var(--foreground)" }}>{l.rowsFetched} fetched · {l.rowsCreated} new · {l.rowsUpdated} already known · {l.passes} pass{l.passes === 1 ? "" : "es"} · {l.pagesFetched} page{l.pagesFetched === 1 ? "" : "s"}</span>
+                    {l.sourceTotal !== null && l.ourTotal !== null && (
+                      <span style={{ fontSize: 12, color: l.sourceTotal === l.ourTotal ? "#16a34a" : "#d97706", fontWeight: 500 }}>
+                        {l.ourTotal.toLocaleString()}/{l.sourceTotal.toLocaleString()} on file
+                      </span>
+                    )}
                     {l.errorMessage && <span style={{ fontSize: 12, color: "#dc2626" }}>{l.errorMessage}</span>}
                   </div>
                 );
@@ -249,7 +295,10 @@ export default function SalesPage() {
                 <tbody>
                   {trips.map(t => (
                     <tr key={t.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td style={{ padding: "10px 14px", whiteSpace: "nowrap", color: "var(--foreground)" }}>{fmtDateTime(t.date)}</td>
+                      <td style={{ padding: "10px 14px", whiteSpace: "nowrap", color: "var(--foreground)" }}>
+                        {fmtDateTime(t.date)}
+                        <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{formatEthiopianDate(dateToEthiopian(new Date(t.date)))} E.C.</div>
+                      </td>
                       <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                           <MapPin size={12} color="var(--muted-foreground)" />
