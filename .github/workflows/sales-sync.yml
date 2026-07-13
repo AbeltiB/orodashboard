@@ -27,10 +27,23 @@ jobs:
             exit 1
           fi
 
-          http_status=$(curl -sS -o response.json -w "%{http_code}" \
-            --max-time 480 \
-            -X POST "${{ vars.SALES_SYNC_URL }}" \
-            -H "x-sync-token: ${{ secrets.SALES_SYNC_TOKEN }}")
+          attempt_sync() {
+            curl -sS -o response.json -w "%{http_code}" \
+              --max-time 480 \
+              -X POST "${{ vars.SALES_SYNC_URL }}" \
+              -H "x-sync-token: ${{ secrets.SALES_SYNC_TOKEN }}"
+          }
+
+          # One retry only, in case the request landed during a rare cold
+          # start (e.g. right after a Render restart/redeploy) and timed out
+          # or dropped rather than being answered — not a routine occurrence
+          # since the keep-alive workflow keeps the service warm.
+          http_status=$(attempt_sync) || true
+          if [ -z "$http_status" ] || [ "$http_status" -ge 500 ]; then
+            echo "First attempt failed (status: '$http_status'), retrying once..."
+            sleep 15
+            http_status=$(attempt_sync)
+          fi
 
           echo "HTTP status: $http_status"
           cat response.json

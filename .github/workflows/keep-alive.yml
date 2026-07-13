@@ -1,0 +1,35 @@
+name: Keep-alive ping
+
+# Render's free web service spins down after ~15 minutes with no inbound
+# traffic, which means the next real request (or the hourly sales-sync
+# trigger) eats a slow cold start. Pinging a cheap health endpoint more
+# often than that keeps the service warm around the clock, so users never
+# see it and the sales-sync workflow never has to absorb it either.
+#
+# Required repo configuration (Settings -> Secrets and variables -> Actions):
+#   Variables: HEALTH_CHECK_URL -> e.g. https://orodashboard.onrender.com/api/health
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping health endpoint
+        run: |
+          if [ -z "${{ vars.HEALTH_CHECK_URL }}" ]; then
+            echo "HEALTH_CHECK_URL (repo variable) is not set." >&2
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 60 "${{ vars.HEALTH_CHECK_URL }}")
+          echo "HTTP status: $http_status"
+
+          if [ "$http_status" -ge 400 ]; then
+            echo "Health check failed." >&2
+            exit 1
+          fi
