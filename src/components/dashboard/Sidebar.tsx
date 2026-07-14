@@ -23,7 +23,7 @@ export default function Sidebar({
       <aside
         className={clsx(
           "sidebar hidden lg:flex flex-col border-r transition-all duration-300",
-          collapsed ? "w-20" : "w-72"
+          collapsed ? "w-20" : "w-60"
         )}
       >
         {/* Logo */}

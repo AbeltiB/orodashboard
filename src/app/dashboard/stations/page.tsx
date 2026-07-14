@@ -830,7 +830,7 @@ function DetailPanel({ station, allStations, onEdit, onDelete, onReload }: {
         </div>
 
         {/* Stats row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
+        <div className="grid-3" style={{ gap: 10, marginBottom: 20 }}>
           {[
             { label: "Terminals",    value: counts.terminalsAsOrigin, icon: <Navigation size={14} /> },
             { label: "Employees",    value: counts.employees,          icon: <Users size={14} />      },
@@ -996,7 +996,7 @@ export default function StationsPage() {
         </div>
 
         {/* Split pane */}
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "320px 1fr", overflow: "hidden" }}>
+        <div className="split-panel" style={{ ["--split-left" as string]: "320px", flex: 1, overflow: "hidden" } as React.CSSProperties}>
 
           {/* Left — station list */}
           <div style={{ borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--surface)" }}>

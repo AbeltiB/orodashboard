@@ -755,7 +755,7 @@ function DetailPanel({ pos, sessions, onEdit, onDelete, onReassign, onStartSessi
         </div>
 
         {/* Stats row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
+        <div className="grid-3" style={{ gap: 10, marginBottom: 20 }}>
           {[
             { label: "Station",       value: pos.station?.name || "Unassigned", icon: <MapPin size={13} /> },
             { label: isShared ? "Current operator" : "Operator", value: isShared ? (openSession?.employeeName || "No active session") : (pos.employee?.name || "Unassigned"), icon: <User size={13} /> },
@@ -1190,7 +1190,7 @@ export default function POSMachinesPage() {
         </div>
 
         {/* Split pane */}
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "320px 1fr", overflow: "hidden" }}>
+        <div className="split-panel" style={{ ["--split-left" as string]: "320px", flex: 1, overflow: "hidden" } as React.CSSProperties}>
 
           {/* Left — list */}
           <div style={{ borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--surface)" }}>

@@ -8,6 +8,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { dateToEthiopian, dateToEthiopianTime, formatEthiopianDate, formatEthiopianTime } from "@/lib/ethiopian-calendar";
+import InfoTip from "@/components/InfoTip";
 
 // ─── Types (mirror the /api/report response shapes we use) ───────────────────
 
@@ -77,9 +78,9 @@ async function apiFetch<T>(path: string): Promise<T> {
 
 // ─── Shared UI atoms ──────────────────────────────────────────────────────────
 
-function StatCard({ icon, label, value, sub, color, lightColor }: {
+function StatCard({ icon, label, value, sub, color, lightColor, info }: {
   icon: React.ReactNode; label: string; value: string | number;
-  sub?: string; color: string; lightColor: string;
+  sub?: string; color: string; lightColor: string; info?: string;
 }) {
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -88,7 +89,10 @@ function StatCard({ icon, label, value, sub, color, lightColor }: {
       </div>
       <div>
         <div style={{ fontSize: 26, fontWeight: 800, color: "var(--foreground)", fontFamily: "monospace", lineHeight: 1 }}>{value}</div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)", marginTop: 4 }}>{label}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)", marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}>
+          {label}
+          {info && <InfoTip text={info} size={12} />}
+        </div>
         {sub && <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{sub}</div>}
       </div>
     </div>
@@ -342,10 +346,10 @@ export default function DashboardPage() {
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
-      <div style={{ minHeight: "100vh", background: "var(--background)", padding: "28px 32px 48px" }}>
+      <div className="page-pad" style={{ minHeight: "100vh", background: "var(--background)", padding: "28px 32px 48px" }}>
 
         {/* ── Header ── */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28, flexWrap: "wrap", gap: 12 }}>
           <div>
             <p style={{ fontSize: 12, fontWeight: 600, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 4px" }}>
               OroDashboard
@@ -419,42 +423,43 @@ export default function DashboardPage() {
         )}
 
         {/* ── KPI STRIP ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 28 }}>
-          <StatCard icon={<MapPin size={18} />}  label="Stations"       value={stations.length}   sub="All regions"                             color="#2563eb" lightColor="#dbeafe" />
-          <StatCard icon={<Users size={18} />}    label="Employees"      value={staffSummary.totalEmployees}  sub={`${staffSummary.withPOS} with POS assigned`}  color="#7c3aed" lightColor="#ede9fe" />
-          <StatCard icon={<Monitor size={18} />}  label="POS Machines"   value={posSummary.total}        sub={`${posSummary.byStatus.ACTIVE} active · ${posSummary.byStatus.IDLE} idle`} color="#16a34a" lightColor="#dcfce7" />
-          <StatCard icon={<Banknote size={18} />} label="Monthly Salary" value={`${fmtCurrency(staffSummary.totalSalary)} ETB`} sub={`${staffSummary.totalEmployees} employees`} color="#d97706" lightColor="#fef3c7" />
+        <div className="grid-4" style={{ gap: 14, marginBottom: 28 }}>
+          <StatCard icon={<MapPin size={18} />}  label="Stations"       value={stations.length}   sub="All regions"                             color="#2563eb" lightColor="#dbeafe" info="Count of stations registered in the system, across all regions." />
+          <StatCard icon={<Users size={18} />}    label="Employees"      value={staffSummary.totalEmployees}  sub={`${staffSummary.withPOS} with POS assigned`}  color="#7c3aed" lightColor="#ede9fe" info="Count of all employees on file (supervisors, ticketers, cashiers), regardless of station or POS assignment." />
+          <StatCard icon={<Monitor size={18} />}  label="POS Machines"   value={posSummary.total}        sub={`${posSummary.byStatus.ACTIVE} active · ${posSummary.byStatus.IDLE} idle`} color="#16a34a" lightColor="#dcfce7" info="Total POS machines registered, split by current status (active / idle / maintenance / decommissioned)." />
+          <StatCard icon={<Banknote size={18} />} label="Monthly Salary" value={`${fmtCurrency(staffSummary.totalSalary)} ETB`} sub={`${staffSummary.totalEmployees} employees`} color="#d97706" lightColor="#fef3c7" info="Sum of each employee's basic salary field — the company's total monthly payroll obligation." />
         </div>
 
         {/* ── SALES STRIP — mirrored from the OTA ticketing system ── */}
         {salesSummary && (
           <div style={{ marginBottom: 28 }}>
             <SectionHeader title="Sales" sub="Mirrored from the OTA ticketing system" action={<NavLink href="/dashboard/sales" label="Full sales report" />} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-              <StatCard icon={<TrendingUp size={18} />} label="Trips" value={salesSummary.trips.toLocaleString()} sub="All time on file" color="#2563eb" lightColor="#dbeafe" />
-              <StatCard icon={<Users size={18} />} label="Passengers" value={salesSummary.passengers.toLocaleString()} sub={`${fmtCurrency(salesSummary.distanceKm)} km covered`} color="#7c3aed" lightColor="#ede9fe" />
-              <StatCard icon={<Wallet size={18} />} label="Tariff Revenue" value={`${fmtCurrency(salesSummary.tariff)} ETB`} sub="Ticket fares" color="#0369a1" lightColor="#e0f2fe" />
-              <StatCard icon={<Banknote size={18} />} label="Total Collected" value={`${fmtCurrency(salesSummary.tariff + salesSummary.totalServiceCharge)} ETB`} sub="Tariff + service charge" color="#16a34a" lightColor="#dcfce7" />
+            <div className="grid-4" style={{ gap: 14 }}>
+              <StatCard icon={<TrendingUp size={18} />} label="Trips" value={salesSummary.trips.toLocaleString()} sub="All time on file" color="#2563eb" lightColor="#dbeafe" info="Count of all ticketed trips ever synced from the OTA ticketing system." />
+              <StatCard icon={<Users size={18} />} label="Passengers" value={salesSummary.passengers.toLocaleString()} sub={`${fmtCurrency(salesSummary.distanceKm)} km covered`} color="#7c3aed" lightColor="#ede9fe" info="Sum of passenger counts across every trip on file." />
+              <StatCard icon={<Wallet size={18} />} label="Tariff Revenue" value={`${fmtCurrency(salesSummary.tariff)} ETB`} sub="Ticket fares" color="#0369a1" lightColor="#e0f2fe" info="Sum of the base ticket fare (tariff) collected across all trips — excludes service charge." />
+              <StatCard icon={<Banknote size={18} />} label="Total Collected" value={`${fmtCurrency(salesSummary.tariff + salesSummary.totalServiceCharge)} ETB`} sub="Tariff + service charge" color="#16a34a" lightColor="#dcfce7" info="Tariff Revenue + total service charge collected — everything taken in at the ticket window." />
             </div>
           </div>
         )}
 
         {/* ── ROW 2: Financial + Staff + Fleet ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 28 }}>
+        <div className="grid-3" style={{ gap: 14, marginBottom: 28 }}>
 
           {/* Financial summary */}
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 22px" }}>
             <SectionHeader title="Financials" sub="Salary & petty cash" action={<NavLink href="/dashboard/reports" label="Full report" />} />
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {[
-                { label: "Total salary bill",     value: `${fmtCurrency(staffSummary.totalSalary)} ETB`,     color: "#d97706", icon: <Banknote size={13} /> },
-                { label: "Total petty cash out",  value: `${fmtCurrency(pettyCashSummary.totalDisbursed)} ETB`,  color: "#dc2626", icon: <Wallet size={13} />   },
-                { label: "Avg salary / employee", value: `${fmtCurrency(staffSummary.totalEmployees ? staffSummary.totalSalary / staffSummary.totalEmployees : 0)} ETB`, color: "#7c3aed", icon: <TrendingUp size={13} /> },
+                { label: "Total salary bill",     value: `${fmtCurrency(staffSummary.totalSalary)} ETB`,     color: "#d97706", icon: <Banknote size={13} />, info: "Sum of every employee's basic salary — the full monthly payroll bill." },
+                { label: "Total petty cash out",  value: `${fmtCurrency(pettyCashSummary.totalDisbursed)} ETB`,  color: "#dc2626", icon: <Wallet size={13} />, info: "Sum of all petty cash disbursements ever recorded, across all supervisors and stations." },
+                { label: "Avg salary / employee", value: `${fmtCurrency(staffSummary.totalEmployees ? staffSummary.totalSalary / staffSummary.totalEmployees : 0)} ETB`, color: "#7c3aed", icon: <TrendingUp size={13} />, info: "Total salary bill ÷ number of employees." },
               ].map(row => (
                 <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "var(--background)", borderRadius: 9, border: "1px solid var(--border)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--muted-foreground)", fontSize: 12 }}>
                     <span style={{ color: row.color }}>{row.icon}</span>
                     {row.label}
+                    <InfoTip text={row.info} size={12} />
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 800, color: row.color, fontFamily: "monospace" }}>{row.value}</span>
                 </div>
@@ -539,7 +544,7 @@ export default function DashboardPage() {
             sub="Live status per station — staff, POS, and open issues"
             action={<NavLink href="/dashboard/stations" label="Manage stations" />}
           />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+          <div className="grid-3" style={{ gap: 14 }}>
             {stationHealth.map(st => {
               const healthColor = st.health === "good" ? "#16a34a" : st.health === "warning" ? "#d97706" : "#dc2626";
               const healthBg    = st.health === "good" ? "#dcfce7" : st.health === "warning" ? "#fef3c7" : "#fee2e2";
@@ -608,7 +613,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── RECENT PETTY CASH + POS TABLE ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div className="grid-2" style={{ gap: 14 }}>
 
           {/* Recent petty cash */}
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px 22px" }}>
@@ -616,6 +621,7 @@ export default function DashboardPage() {
             {recentPettyCash.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--muted-foreground)" }}>No petty cash records yet.</p>
             ) : (
+              <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
@@ -635,6 +641,7 @@ export default function DashboardPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
 
@@ -644,6 +651,7 @@ export default function DashboardPage() {
             {posRows.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--muted-foreground)" }}>No POS machines registered yet.</p>
             ) : (
+              <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
@@ -675,6 +683,7 @@ export default function DashboardPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>

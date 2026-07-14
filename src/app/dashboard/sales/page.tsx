@@ -11,6 +11,7 @@ import {
   ETHIOPIAN_MONTH_NAMES, dateToEthiopian, ethiopianToGregorian,
   formatEthiopianDate, gregorianToEthiopian, isEthiopianLeap,
 } from "@/lib/ethiopian-calendar";
+import InfoTip from "@/components/InfoTip";
 
 // ─── Types matching the sales API ──────────────────────────────────────────────
 
@@ -246,36 +247,50 @@ function daysInEthiopianMonth(month: number, year: number): number {
 }
 
 function EthiopianDateInput({ value, onChange }: { value: string; onChange: (isoDate: string) => void }) {
-  const eth = (() => {
+  const derivedEth = (() => {
     if (!value) return null;
     const [y, m, d] = value.split("-").map(Number);
     if (!y || !m || !d) return null;
     return gregorianToEthiopian(y, m, d);
   })();
 
-  function set(year: number | null, month: number | null, day: number | null) {
-    const y = year ?? eth?.year ?? null;
-    const m = month ?? eth?.month ?? null;
-    const d = day ?? eth?.day ?? null;
+  // Day/month/year are tracked locally so a partially-typed date (e.g. just
+  // the day) survives across keystrokes — deriving purely from `value` meant
+  // nothing was ever kept until all three fields were filled in the same
+  // render, so onChange never fired and the filter looked permanently blank.
+  const [day, setDay] = useState<number | null>(derivedEth?.day ?? null);
+  const [month, setMonth] = useState<number | null>(derivedEth?.month ?? null);
+  const [year, setYear] = useState<number | null>(derivedEth?.year ?? null);
+
+  // Stay in sync when the value is changed/cleared from outside (e.g. the
+  // page's "Clear all" button, or this field's own Clear button).
+  useEffect(() => {
+    setDay(derivedEth?.day ?? null);
+    setMonth(derivedEth?.month ?? null);
+    setYear(derivedEth?.year ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  function commit(y: number | null, m: number | null, d: number | null) {
     if (y && m && d) {
       const g = ethiopianToGregorian(y, m, d);
       onChange(`${g.year}-${String(g.month).padStart(2, "0")}-${String(g.day).padStart(2, "0")}`);
     }
   }
 
-  const maxDay = eth ? daysInEthiopianMonth(eth.month, eth.year) : 30;
+  const maxDay = month && year ? daysInEthiopianMonth(month, year) : 30;
 
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <input type="number" placeholder="Day" min={1} max={maxDay} value={eth?.day ?? ""}
-        onChange={e => set(null, null, e.target.value ? Number(e.target.value) : null)}
+      <input type="number" placeholder="Day" min={1} max={maxDay} value={day ?? ""}
+        onChange={e => { const d = e.target.value ? Number(e.target.value) : null; setDay(d); commit(year, month, d); }}
         style={{ ...iCss, width: 54, padding: "0 6px", textAlign: "center" }} />
-      <select value={eth?.month ?? ""} onChange={e => set(null, e.target.value ? Number(e.target.value) : null, null)} style={{ ...selCss, width: 108, padding: "0 6px" }}>
+      <select value={month ?? ""} onChange={e => { const m = e.target.value ? Number(e.target.value) : null; setMonth(m); commit(year, m, day); }} style={{ ...selCss, width: 108, padding: "0 6px" }}>
         <option value="">Month</option>
         {ETHIOPIAN_MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
       </select>
-      <input type="number" placeholder="Year" value={eth?.year ?? ""}
-        onChange={e => set(e.target.value ? Number(e.target.value) : null, null, null)}
+      <input type="number" placeholder="Year" value={year ?? ""}
+        onChange={e => { const y = e.target.value ? Number(e.target.value) : null; setYear(y); commit(y, month, day); }}
         style={{ ...iCss, width: 70, padding: "0 6px", textAlign: "center" }} />
       {value && (
         <button onClick={() => onChange("")} title="Clear" style={{ width: 28, height: 28, borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--surface)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-foreground)", flexShrink: 0 }}>
@@ -604,7 +619,7 @@ export default function SalesPage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } } * { box-sizing: border-box; }`}</style>
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
 
-      <div style={{ minHeight: "100vh", background: "var(--background)", padding: "24px 28px" }}>
+      <div className="page-pad" style={{ minHeight: "100vh", background: "var(--background)", padding: "24px 28px" }}>
 
         {/* Top bar */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
@@ -696,15 +711,18 @@ export default function SalesPage() {
         {/* Grand totals — finance/management summary for the current filtered view */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 18 }}>
           {[
-            { label: "Trips", value: total.toLocaleString(), icon: <RouteIcon size={14} /> },
-            { label: "Distance", value: `${fmtMoney(totals.distanceKm)} km`, icon: <Gauge size={14} /> },
-            { label: "Passengers", value: totals.passengers.toLocaleString(), icon: <UsersIcon size={14} /> },
-            { label: "Tariff revenue", value: `${fmtMoney(totals.tariff)} ETB`, icon: <Wallet size={14} /> },
-            { label: "Service charge collected", value: `${fmtMoney(totals.totalServiceCharge)} ETB`, icon: <Coins size={14} /> },
-            { label: "Total collected", value: `${fmtMoney(totalCollected)} ETB`, icon: <Wallet size={14} />, accent: true },
+            { label: "Trips", value: total.toLocaleString(), icon: <RouteIcon size={14} />, info: "Count of ticketed trips matching the current filters, mirrored from the OTA ticketing system." },
+            { label: "Distance", value: `${fmtMoney(totals.distanceKm)} km`, icon: <Gauge size={14} />, info: "Sum of each trip's route distance (km) across all filtered trips." },
+            { label: "Passengers", value: totals.passengers.toLocaleString(), icon: <UsersIcon size={14} />, info: "Sum of passenger counts recorded on each filtered trip's ticket." },
+            { label: "Tariff revenue", value: `${fmtMoney(totals.tariff)} ETB`, icon: <Wallet size={14} />, info: "Sum of the ticket fare (tariff) charged per trip — excludes service charge." },
+            { label: "Service charge collected", value: `${fmtMoney(totals.totalServiceCharge)} ETB`, icon: <Coins size={14} />, info: "Sum of (service charge per passenger × passengers) across filtered trips." },
+            { label: "Total collected", value: `${fmtMoney(totalCollected)} ETB`, icon: <Wallet size={14} />, accent: true, info: "Tariff revenue + service charge collected — the full amount taken in across filtered trips." },
           ].map(s => (
             <div key={s.label} style={{ background: s.accent ? "color-mix(in srgb, var(--primary) 8%, var(--surface))" : "var(--surface)", border: `1px solid ${s.accent ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "var(--border)"}`, borderRadius: 10, padding: "12px 14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}>{s.icon} {s.label}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}>
+                {s.icon} {s.label}
+                <InfoTip text={s.info} />
+              </div>
               <div style={{ fontSize: 17, fontWeight: 700, color: s.accent ? "var(--primary)" : "var(--foreground)" }}>{s.value}</div>
             </div>
           ))}
@@ -719,7 +737,7 @@ export default function SalesPage() {
             )}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
+          <div className="grid-4" style={{ gap: 12, marginBottom: 12 }}>
             <Field label="Departure station">
               <select style={selCss} value={departureTerminal} onChange={e => { setDepartureTerminal(e.target.value); setOffset(0); }}>
                 <option value="">All stations</option>
@@ -743,7 +761,7 @@ export default function SalesPage() {
             </Field>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div className="grid-2" style={{ gap: 12, marginBottom: 12 }}>
             <Field label="Date from — Gregorian">
               <input type="date" style={iCss} value={dateFrom} onChange={e => { setDateFrom(e.target.value); setOffset(0); }} />
             </Field>

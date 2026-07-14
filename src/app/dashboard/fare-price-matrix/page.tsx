@@ -449,7 +449,7 @@ export default function FarePriceMatrixPage() {
       )}
 
       {/* ── Summary chips — quick glance at all 18 rates ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 28 }}>
+      <div className="grid-3" style={{ gap: 12, marginBottom: 28 }}>
         {matrix.map(bt => (
           <div key={bt.id} style={{ background: "var(--surface)", border: `1.5px solid ${bt.color}33`, borderRadius: 14, padding: "16px 18px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 12 }}>
@@ -498,7 +498,7 @@ export default function FarePriceMatrixPage() {
       </div>
 
       {/* ── Active type: matrix + bars side by side ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16, marginBottom: 24 }}>
+      <div className="split-panel-r" style={{ ["--split-right" as string]: "360px", gap: 16, marginBottom: 24 } as React.CSSProperties}>
         <BusTypeTable
           bt={activeBT}
           onChange={(level, road, value) => updateRate(activeBT.id, level, road, value)}

@@ -11,7 +11,7 @@
   --primary-foreground: #ffffff;
 
   /* Backgrounds */
-  --background: #ffffff;
+  --background: #f1f4f2;
   --surface: #ffffff;
   --sidebar: #ffffff;
 
@@ -310,4 +310,113 @@ body {
 ::selection {
   background: var(--primary);
   color: white;
+}
+
+/* ==========================================
+   RESPONSIVE GRIDS
+   Fixed-column layouts (used across dashboard,
+   sales and reports pages) collapse on smaller
+   screens instead of squeezing columns.
+========================================== */
+
+.grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); }
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); }
+
+@media (max-width: 1024px) {
+  .grid-5, .grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .grid-5, .grid-4, .grid-3, .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Fixed-width side panel + flexible content (list/detail views). The fixed
+   width is passed per-instance via the --split-left custom property; below
+   900px the two stack instead of the left panel getting crushed. */
+.split-panel {
+  display: grid;
+  grid-template-columns: var(--split-left, 320px) 1fr;
+}
+
+@media (max-width: 900px) {
+  .split-panel { grid-template-columns: 1fr; }
+}
+
+/* Same idea, mirrored — flexible content first, fixed panel on the right. */
+.split-panel-r {
+  display: grid;
+  grid-template-columns: 1fr var(--split-right, 320px);
+}
+
+@media (max-width: 900px) {
+  .split-panel-r { grid-template-columns: 1fr; }
+}
+
+/* ==========================================
+   INFO TOOLTIP
+   Small "what does this number mean" hint used
+   on stat cards — especially money figures.
+========================================== */
+
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.info-tip .info-tip-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  width: max-content;
+  max-width: 240px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 40;
+}
+
+.info-tip .info-tip-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--foreground);
+}
+
+.info-tip:hover .info-tip-bubble,
+.info-tip:focus-visible .info-tip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ==========================================
+   MOBILE ADJUSTMENTS
+========================================== */
+
+@media (max-width: 640px) {
+  .page-pad {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
 }

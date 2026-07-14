@@ -6,6 +6,7 @@ import {
   MapPin, Users, Monitor, Wallet, Calculator, TrendingUp,
   X, Check, FileSpreadsheet, Printer, RefreshCw, AlertCircle,
 } from "lucide-react";
+import InfoTip from "@/components/InfoTip";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -178,10 +179,13 @@ function Table({ headers, rows, emptyMsg = "No data matches the current filters.
   );
 }
 
-function SummaryChip({ label, value, color }: { label: string; value: string | number; color: string }) {
+function SummaryChip({ label, value, color, info }: { label: string; value: string | number; color: string; info?: string }) {
   return (
     <div style={{ background: "var(--background)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 16px", borderLeft: `3px solid ${color}` }}>
-      <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>
+        {label}
+        {info && <InfoTip text={info} size={12} />}
+      </div>
       <div style={{ fontSize: 18, fontWeight: 800, color: "var(--foreground)", fontFamily: "monospace" }}>{value}</div>
     </div>
   );
@@ -265,10 +269,10 @@ function FareSummaryReport({ stations }: { stations: StationOption[] }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Routes" value={summary?.totalRoutes ?? 0} color="#2563eb" />
-        <SummaryChip label="Min fare" value={summary?.minFare != null ? fmtCurrency(summary.minFare) : "—"} color="#16a34a" />
-        <SummaryChip label="Max fare" value={summary?.maxFare != null ? fmtCurrency(summary.maxFare) : "—"} color="#d97706" />
+      <div className="grid-3" style={{ gap: 10, marginBottom: 16 }}>
+        <SummaryChip label="Routes" value={summary?.totalRoutes ?? 0} color="#2563eb" info="Count of distinct station × terminal × bus-type × level combinations matching the filters." />
+        <SummaryChip label="Min fare" value={summary?.minFare != null ? fmtCurrency(summary.minFare) : "—"} color="#16a34a" info="Lowest total fare (distance × rate, asphalt or gravel) among the filtered routes." />
+        <SummaryChip label="Max fare" value={summary?.maxFare != null ? fmtCurrency(summary.maxFare) : "—"} color="#d97706" info="Highest total fare (distance × rate, asphalt or gravel) among the filtered routes." />
       </div>
 
       <ReportState loading={loading} error={error} onRetry={load} />
@@ -329,10 +333,10 @@ function PettyCashLedger({ stations, supervisors }: { stations: StationOption[];
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Disbursements" value={summary?.totalRecords ?? 0} color="#7c3aed" />
-        <SummaryChip label="Total disbursed" value={fmtCurrency(summary?.totalDisbursed ?? 0)} color="#dc2626" />
-        <SummaryChip label="Avg per entry" value={summary?.totalRecords ? fmtCurrency(summary.avgPerEntry) : "—"} color="#d97706" />
+      <div className="grid-3" style={{ gap: 10, marginBottom: 16 }}>
+        <SummaryChip label="Disbursements" value={summary?.totalRecords ?? 0} color="#7c3aed" info="Count of individual petty cash disbursement entries matching the filters." />
+        <SummaryChip label="Total disbursed" value={fmtCurrency(summary?.totalDisbursed ?? 0)} color="#dc2626" info="Sum of the amount field across every filtered disbursement." />
+        <SummaryChip label="Avg per entry" value={summary?.totalRecords ? fmtCurrency(summary.avgPerEntry) : "—"} color="#d97706" info="Total disbursed ÷ number of disbursements." />
       </div>
 
       <ReportState loading={loading} error={error} onRetry={load} />
@@ -399,11 +403,11 @@ function StaffRoster({ stations }: { stations: StationOption[] }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Total staff" value={summary?.totalEmployees ?? 0} color="#2563eb" />
-        <SummaryChip label="Supervisors" value={summary?.byRole?.SUPERVISOR ?? 0} color="#7c3aed" />
-        <SummaryChip label="With POS" value={summary?.withPOS ?? 0} color="#16a34a" />
-        <SummaryChip label="Total salary" value={fmtCurrency(summary?.totalSalary ?? 0)} color="#d97706" />
+      <div className="grid-4" style={{ gap: 10, marginBottom: 16 }}>
+        <SummaryChip label="Total staff" value={summary?.totalEmployees ?? 0} color="#2563eb" info="Count of employees matching the station/role/sex filters." />
+        <SummaryChip label="Supervisors" value={summary?.byRole?.SUPERVISOR ?? 0} color="#7c3aed" info="Count of employees with the SUPERVISOR role among the filtered staff." />
+        <SummaryChip label="With POS" value={summary?.withPOS ?? 0} color="#16a34a" info="Count of filtered employees who currently have a POS machine assigned to them." />
+        <SummaryChip label="Total salary" value={fmtCurrency(summary?.totalSalary ?? 0)} color="#d97706" info="Sum of the basic salary field across all filtered employees." />
       </div>
 
       <ReportState loading={loading} error={error} onRetry={load} />
@@ -476,11 +480,11 @@ function POSFleetReport({ stations }: { stations: StationOption[] }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Total machines" value={filtered.length} color="#2563eb" />
-        <SummaryChip label="Active" value={summary?.byStatus?.ACTIVE ?? 0} color="#16a34a" />
-        <SummaryChip label="Need update" value={summary?.outdated ?? 0} color="#d97706" />
-        <SummaryChip label="In maintenance" value={summary?.byStatus?.MAINTENANCE ?? 0} color="#dc2626" />
+      <div className="grid-4" style={{ gap: 10, marginBottom: 16 }}>
+        <SummaryChip label="Total machines" value={filtered.length} color="#2563eb" info="Count of POS machines matching the station/status/version filters." />
+        <SummaryChip label="Active" value={summary?.byStatus?.ACTIVE ?? 0} color="#16a34a" info="Count of filtered machines currently in ACTIVE status." />
+        <SummaryChip label="Need update" value={summary?.outdated ?? 0} color="#d97706" info="Count of machines running an app version older than the latest known version." />
+        <SummaryChip label="In maintenance" value={summary?.byStatus?.MAINTENANCE ?? 0} color="#dc2626" info="Count of filtered machines currently flagged as under MAINTENANCE." />
       </div>
 
       <ReportState loading={loading} error={error} onRetry={load} />
@@ -543,11 +547,11 @@ function StationSummaryReport({ stations }: { stations: StationOption[] }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Stations" value={summary?.totalStations ?? 0} color="#2563eb" />
-        <SummaryChip label="Total staff" value={summary?.totalEmployees ?? 0} color="#7c3aed" />
-        <SummaryChip label="Total salary" value={fmtCurrency(summary?.grandMonthlySalary ?? 0)} color="#d97706" />
-        <SummaryChip label="Total petty cash" value={fmtCurrency(summary?.grandPettyCash ?? 0)} color="#dc2626" />
+      <div className="grid-4" style={{ gap: 10, marginBottom: 16 }}>
+        <SummaryChip label="Stations" value={summary?.totalStations ?? 0} color="#2563eb" info="Count of stations matching the region filter." />
+        <SummaryChip label="Total staff" value={summary?.totalEmployees ?? 0} color="#7c3aed" info="Sum of employeeCount across the filtered stations." />
+        <SummaryChip label="Total salary" value={fmtCurrency(summary?.grandMonthlySalary ?? 0)} color="#d97706" info="Sum of each filtered station's monthly salary total (their employees' basic salaries combined)." />
+        <SummaryChip label="Total petty cash" value={fmtCurrency(summary?.grandPettyCash ?? 0)} color="#dc2626" info="Sum of petty cash disbursed across the filtered stations, all-time." />
       </div>
 
       <ReportState loading={loading} error={error} onRetry={load} />
@@ -619,11 +623,11 @@ function SalesSummaryReport() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-        <SummaryChip label="Ticketers" value={summary?.totalTicketers ?? 0} color="#2563eb" />
-        <SummaryChip label="Trips" value={summary?.trips ?? 0} color="#7c3aed" />
-        <SummaryChip label="Passengers" value={summary?.passengers ?? 0} color="#0369a1" />
-        <SummaryChip label="Total collected" value={fmtCurrency(summary?.totalCollected ?? 0)} color="#16a34a" />
+      <div className="grid-4" style={{ gap: 10, marginBottom: 16 }}>
+        <SummaryChip label="Ticketers" value={summary?.totalTicketers ?? 0} color="#2563eb" info="Count of distinct ticketers with at least one trip matching the filters." />
+        <SummaryChip label="Trips" value={summary?.trips ?? 0} color="#7c3aed" info="Count of ticketed trips matching the date/route filters." />
+        <SummaryChip label="Passengers" value={summary?.passengers ?? 0} color="#0369a1" info="Sum of passenger counts across the filtered trips." />
+        <SummaryChip label="Total collected" value={fmtCurrency(summary?.totalCollected ?? 0)} color="#16a34a" info="Tariff revenue + service charge collected across the filtered trips." />
       </div>
 
       <ReportState loading={loading} error={error} onRetry={load} />
@@ -683,7 +687,7 @@ export default function ReportsPage() {
       <div style={{ minHeight: "100vh", background: "var(--background)", display: "flex", flexDirection: "column" }}>
 
         {/* ── Page header ── */}
-        <div style={{ padding: "28px 32px 0", flexShrink: 0 }}>
+        <div className="page-pad" style={{ padding: "28px 32px 0", flexShrink: 0 }}>
           <div style={{ marginBottom: 24 }}>
             <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>Reports</h1>
             <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "4px 0 0" }}>
@@ -715,7 +719,7 @@ export default function ReportsPage() {
         </div>
 
         {/* ── Active report panel ── */}
-        <div style={{ flex: 1, padding: "20px 32px 32px" }}>
+        <div className="page-pad" style={{ flex: 1, padding: "20px 32px 32px" }}>
           {/* Report header */}
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, padding: "16px 20px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, borderLeft: `4px solid ${active.color}` }}>
             <div style={{ width: 40, height: 40, borderRadius: 10, background: active.lightColor, display: "flex", alignItems: "center", justifyContent: "center", color: active.color, flexShrink: 0 }}>

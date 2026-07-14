@@ -582,7 +582,7 @@ function DetailPanel({ emp, onEdit, onDelete, onReload }: {
         </div>
 
         {/* Quick stat row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
+        <div className="grid-3" style={{ gap: 10, marginBottom: 20 }}>
           {[
             { label: "Basic salary",  value: fmtCurrency(emp.basicSalary), icon: <Banknote size={13} /> },
             { label: "Station",       value: emp.station?.name || "—",     icon: <MapPin size={13} /> },
@@ -808,7 +808,7 @@ export default function EmployeesPage() {
         </div>
 
         {/* Split pane */}
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "340px 1fr", overflow: "hidden" }}>
+        <div className="split-panel" style={{ ["--split-left" as string]: "340px", flex: 1, overflow: "hidden" } as React.CSSProperties}>
 
           {/* Left list */}
           <div style={{ borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--surface)" }}>

@@ -577,7 +577,7 @@ export default function ShiftsPage() {
         </div>
 
         {/* Filters */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 20, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14 }}>
+        <div className="grid-5" style={{ gap: 10, marginBottom: 20, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14 }}>
           <select style={{ ...selCss, height: 36, fontSize: 13 }} value={filterStation} onChange={e => setFilterStation(e.target.value)}>
             <option value="All">All stations</option>
             {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}

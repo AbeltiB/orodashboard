@@ -106,18 +106,18 @@ function Spinner() {
 
 function ErrorBanner({ message }: { message: string }) {
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, marginBottom: 18 }}>
-      <AlertCircle size={15} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
-      <span style={{ fontSize: 13, color: "#dc2626", lineHeight: 1.5 }}>{message}</span>
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px", background: "var(--danger-bg)", border: "1px solid color-mix(in srgb, var(--danger) 40%, transparent)", borderRadius: 10, marginBottom: 18 }}>
+      <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+      <span style={{ fontSize: 13, color: "var(--danger)", lineHeight: 1.5 }}>{message}</span>
     </div>
   );
 }
 
 function SuccessBanner({ message }: { message: string }) {
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, marginBottom: 18 }}>
-      <CheckCircle2 size={15} color="#16a34a" style={{ flexShrink: 0, marginTop: 1 }} />
-      <span style={{ fontSize: 13, color: "#16a34a", lineHeight: 1.5 }}>{message}</span>
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px", background: "var(--success-bg)", border: "1px solid color-mix(in srgb, var(--success) 40%, transparent)", borderRadius: 10, marginBottom: 18 }}>
+      <CheckCircle2 size={15} color="var(--success)" style={{ flexShrink: 0, marginTop: 1 }} />
+      <span style={{ fontSize: 13, color: "var(--success)", lineHeight: 1.5 }}>{message}</span>
     </div>
   );
 }
@@ -226,22 +226,26 @@ export default function LoginPage() {
         * { box-sizing: border-box; }
       `}</style>
 
-      <main style={{ background: "#ffffff", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
+      <main style={{ background: "var(--background)", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
         <div style={{ width: "100%", maxWidth: "420px" }}>
 
-          {/* ── Logo ── */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginBottom: 36 }}>
-            {/* Replace with <Image src="/orodashboard-logo.png" ... /> when available */}
-            <svg width="80" height="80" viewBox="0 0 88 88" fill="none" aria-hidden="true">
-              <polygon points="44,6 82,78 6,78" fill="#1d4ed8" />
-              <line x1="44" y1="14" x2="44" y2="72" stroke="white" strokeWidth="3.5" strokeLinecap="round"/>
-              <line x1="44" y1="28" x2="28" y2="72" stroke="white" strokeWidth="3" strokeLinecap="round" opacity="0.6"/>
-              <line x1="44" y1="28" x2="60" y2="72" stroke="white" strokeWidth="3" strokeLinecap="round" opacity="0.6"/>
-              <circle cx="44" cy="7" r="5" fill="white"/>
-            </svg>
+          {/* ── Logo — text-based wordmark, no external asset ── */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, marginBottom: 36 }}>
+            <div
+              aria-hidden="true"
+              style={{
+                width: 64, height: 64, borderRadius: 16,
+                background: "var(--primary)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 24, fontWeight: 800, color: "#ffffff", letterSpacing: "-0.02em",
+                boxShadow: "0 6px 20px color-mix(in srgb, var(--primary) 35%, transparent)",
+              }}
+            >
+              OD
+            </div>
             <div style={{ textAlign: "center", lineHeight: 1 }}>
-              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.18em", color: "#0f172a" }}>ORODASHBOARD</div>
-              <div style={{ fontSize: 11, letterSpacing: "0.06em", color: "#64748b", marginTop: 4 }}>Smart Mobility, Simple Life.</div>
+              <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.18em", color: "var(--foreground)" }}>ORODASHBOARD</div>
+              <div style={{ fontSize: 11, letterSpacing: "0.06em", color: "var(--muted-foreground)", marginTop: 4 }}>Smart Mobility, Simple Life.</div>
             </div>
           </div>
 
@@ -250,10 +254,10 @@ export default function LoginPage() {
 
             {/* Heading */}
             <div style={{ textAlign: "center", marginBottom: 28 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em", color: "#0f172a", margin: "0 0 8px" }}>
+              <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em", color: "var(--foreground)", margin: "0 0 8px" }}>
                 {meta.title}
               </h1>
-              <p style={{ fontSize: 14, color: "#64748b", lineHeight: 1.55, margin: 0 }}>
+              <p style={{ fontSize: 14, color: "var(--muted-foreground)", lineHeight: 1.55, margin: 0 }}>
                 {meta.sub}
               </p>
             </div>
@@ -268,7 +272,7 @@ export default function LoginPage() {
                 <div style={{ marginBottom: 22 }}>
                   <label htmlFor="phone" style={labelStyle}>Phone number</label>
                   <div style={wrapStyle(phoneFocused)}>
-                    <div style={{ display: "flex", alignItems: "center", padding: "0 14px", borderRight: "1.5px solid #e2e8f0", fontSize: 14, fontWeight: 500, color: "#64748b", whiteSpace: "nowrap", userSelect: "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", padding: "0 14px", borderRight: "1.5px solid var(--border)", fontSize: 14, fontWeight: 500, color: "var(--muted-foreground)", whiteSpace: "nowrap", userSelect: "none" }}>
                       ET +251
                     </div>
                     <input
@@ -283,7 +287,7 @@ export default function LoginPage() {
                       style={baseInputStyle}
                     />
                   </div>
-                  <p style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>9 digits, no leading zero</p>
+                  <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 6 }}>9 digits, no leading zero</p>
                 </div>
 
                 <button onClick={handleSendOtp} disabled={!phoneValid || loading} style={primaryBtn(phoneValid && !loading)}>
@@ -296,11 +300,11 @@ export default function LoginPage() {
             {/* ── STEP: otp_sent ── */}
             {step === "otp_sent" && (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, padding: "10px 12px", background: "#f8fafc", borderRadius: 9, border: "1px solid #e2e8f0" }}>
-                  <span style={{ fontSize: 13, color: "#64748b" }}>
-                    Signing in as <strong style={{ color: "#0f172a" }}>+251{phone}</strong>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, padding: "10px 12px", background: "var(--background)", borderRadius: 9, border: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
+                    Signing in as <strong style={{ color: "var(--foreground)" }}>+251{phone}</strong>
                   </span>
-                  <button onClick={goBack} style={{ fontSize: 12, color: "#2563eb", background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: 0 }}>
+                  <button onClick={goBack} style={{ fontSize: 12, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: 0 }}>
                     ← change
                   </button>
                 </div>
@@ -319,7 +323,7 @@ export default function LoginPage() {
                     placeholder="••••••"
                   />
                 </div>
-                <p style={{ fontSize: 12, color: "#64748b", marginTop: 6, marginBottom: 20 }}>
+                <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 6, marginBottom: 20 }}>
                   Code expires in 5 minutes.
                 </p>
 
@@ -331,7 +335,7 @@ export default function LoginPage() {
                 <button style={ghostBtn()} onClick={handleResendOtp} disabled={loading}>
                   Resend code
                 </button>
-                <button style={{ ...ghostBtn(), color: "#64748b", marginTop: 6 }} onClick={goBack}>
+                <button style={{ ...ghostBtn(), color: "var(--muted-foreground)", marginTop: 6 }} onClick={goBack}>
                   ← Back to phone
                 </button>
               </>
@@ -339,9 +343,9 @@ export default function LoginPage() {
           </div>
 
           {/* ── Footer ── */}
-          <p style={{ marginTop: 28, textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+          <p style={{ marginTop: 28, textAlign: "center", fontSize: 12, color: "var(--muted-foreground)" }}>
             OroDashboard Admin · powered by{" "}
-            <span style={{ fontWeight: 600, color: "#64748b" }}>BS Tech Digital</span>
+            <span style={{ fontWeight: 600, color: "var(--foreground)" }}>BS Tech Digital</span>
           </p>
         </div>
       </main>

@@ -400,7 +400,7 @@ function UserDetail({ user, isSelf, onEdit, onDelete, onToggleActive }: {
         </div>
 
         {/* Quick info strip */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 18 }}>
+        <div className="grid-3" style={{ gap: 8, marginBottom: 18 }}>
           {[
             { label: "Last login",  value: fmtDateTime(user.lastLoginAt), color: "#2563eb" },
             { label: "Created",     value: fmtDate(user.createdAt),       color: "#16a34a" },
@@ -917,7 +917,7 @@ function UsersSection() {
       {modal === "edit"   && active && <UserFormModal initial={active} onSave={updateUser} onClose={() => setModal(null)} />}
       {modal === "delete" && active && <DeleteModal user={active} onConfirm={deleteUser} onClose={() => setModal(null)} />}
 
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%", overflow: "hidden", borderRadius: 14, border: "1px solid var(--border)" }}>
+      <div className="split-panel" style={{ ["--split-left" as string]: "280px", height: "100%", overflow: "hidden", borderRadius: 14, border: "1px solid var(--border)" } as React.CSSProperties}>
         {/* Left list */}
         <div style={{ borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--surface)" }}>
           <div style={{ padding: "12px 12px 8px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
