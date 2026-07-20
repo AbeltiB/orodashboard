@@ -28,8 +28,8 @@ export default function MobileSidebar({
       />
 
       {/* Sidebar */}
-      <aside className="sidebar fixed left-0 top-0 z-50 h-screen w-72 p-4 lg:hidden">
-        <div className="mb-8 flex items-center justify-between">
+      <aside className="sidebar fixed left-0 top-0 z-50 flex h-screen w-72 flex-col p-4 lg:hidden">
+        <div className="mb-8 flex flex-shrink-0 items-center justify-between">
           <h1 className="text-xl font-bold">
             OroDashboard
           </h1>
@@ -42,7 +42,7 @@ export default function MobileSidebar({
           </button>
         </div>
 
-        <nav className="space-y-2">
+        <nav className="flex-1 space-y-2 overflow-y-auto">
           {navigation.map((item) => {
             const Icon = item.icon;
 

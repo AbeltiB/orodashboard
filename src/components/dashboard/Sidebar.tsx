@@ -49,8 +49,9 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 space-y-2 p-4">
+        {/* Navigation — scrolls on its own if it ever outgrows the viewport;
+            the logo/collapse row above stays put either way. */}
+        <nav className="flex-1 space-y-2 overflow-y-auto p-4">
           {navigation.map((item) => {
             const Icon = item.icon;
 

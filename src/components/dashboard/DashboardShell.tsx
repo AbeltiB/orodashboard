@@ -17,8 +17,8 @@ export default function DashboardShell({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-[var(--background)]">
-      {/* Desktop Sidebar */}
+    <div className="flex h-screen overflow-hidden bg-[var(--background)]">
+      {/* Desktop Sidebar — its own fixed-height column, scrolls independently of the main content */}
       <Sidebar
         collapsed={collapsed}
         setCollapsed={setCollapsed}
@@ -31,7 +31,7 @@ export default function DashboardShell({
       />
 
       {/* Main Content */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header
           collapsed={collapsed}
           setCollapsed={setCollapsed}
@@ -39,7 +39,7 @@ export default function DashboardShell({
           user={user}
         />
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>
       </div>
