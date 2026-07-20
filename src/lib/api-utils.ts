@@ -1,5 +1,5 @@
 // src/lib/api-utils.ts
-import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone, type PosSession, type ShiftAssignment, type ShiftImportBatch, type SalesTrip, type SalesSyncLog } from "@/generated/prisma/client";
+import { $Enums, type Terminal, type Station, type Employee, type PosMachine, type Zone, type PosSession, type ShiftAssignment, type ShiftImportBatch, type SalesTrip, type SalesSyncLog, type OtaEmployee, type OtaTerminal, type OtaVehicle, type OtaSyncLog } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -391,6 +391,94 @@ export function serializeSalesSyncLog(l: SalesSyncLog) {
     windowTo: l.windowTo,
     status: l.status,
     passes: l.passes,
+    pagesFetched: l.pagesFetched,
+    rowsFetched: l.rowsFetched,
+    rowsCreated: l.rowsCreated,
+    rowsUpdated: l.rowsUpdated,
+    sourceTotal: l.sourceTotal,
+    ourTotal: l.ourTotal,
+    rateLimitedUntil: l.rateLimitedUntil,
+    errorMessage: l.errorMessage,
+    startedAt: l.startedAt,
+    finishedAt: l.finishedAt,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OTA mirrors (employees/accounts, terminals, vehicles) — read-only, no
+// write-back. `raw` (the complete untouched source payload) is included so
+// the UI can show anything not surfaced as its own column.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function serializeOtaEmployee(e: OtaEmployee) {
+  return {
+    id: e.id,
+    companyId: e.companyId,
+    userId: e.userId,
+    fullName: e.fullName,
+    phone: e.phone,
+    email: e.email,
+    position: e.position,
+    department: e.department,
+    employeeIdExternal: e.employeeIdExternal,
+    joiningDate: e.joiningDate,
+    endDate: e.endDate,
+    isActive: e.isActive,
+    roleName: e.roleName,
+    roleLabel: e.roleLabel,
+    userStatus: e.userStatus,
+    terminalId: e.terminalId,
+    terminalName: e.terminalName,
+    raw: e.raw,
+    firstSeenAt: e.firstSeenAt,
+    updatedAt: e.updatedAt,
+  };
+}
+
+export function serializeOtaTerminal(t: OtaTerminal) {
+  return {
+    id: t.id,
+    name: t.name,
+    address: t.address,
+    status: t.status,
+    zoneName: t.zoneName,
+    woredaName: t.woredaName,
+    cityName: t.cityName,
+    companyNames: t.companyNames,
+    raw: t.raw,
+    firstSeenAt: t.firstSeenAt,
+    updatedAt: t.updatedAt,
+  };
+}
+
+export function serializeOtaVehicle(v: OtaVehicle) {
+  return {
+    id: v.id,
+    plateNumber: v.plateNumber,
+    plateRegion: v.plateRegion,
+    seatCapacity: v.seatCapacity,
+    status: v.status,
+    isAssignedToRoute: v.isAssignedToRoute,
+    driverName: v.driverName,
+    driverLicenceNumber: v.driverLicenceNumber,
+    fleetTypeName: v.fleetTypeName,
+    associationName: v.associationName,
+    assignedTerminalId: v.assignedTerminalId,
+    assignedTerminalName: v.assignedTerminalName,
+    vehicleLevelName: v.vehicleLevelName,
+    raw: v.raw,
+    firstSeenAt: v.firstSeenAt,
+    updatedAt: v.updatedAt,
+  };
+}
+
+export function serializeOtaSyncLog(l: OtaSyncLog) {
+  return {
+    id: l.id,
+    entity: l.entity,
+    source: l.source,
+    triggeredBy: l.triggeredBy,
+    status: l.status,
     pagesFetched: l.pagesFetched,
     rowsFetched: l.rowsFetched,
     rowsCreated: l.rowsCreated,

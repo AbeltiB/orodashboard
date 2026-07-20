@@ -657,3 +657,136 @@ model SalesSyncLog {
   @@index([startedAt])
   @@map("sales_sync_logs")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OTA MIRRORS — employees/accounts, terminals, vehicles
+// Read-only mirrors of OTA's own data (no write-back). Distinct from the
+// locally-managed Employee/Station/Terminal models above, which are
+// OroDashboard's own payroll/POS/ops entities. `raw` keeps the complete,
+// untouched source payload alongside the flattened columns used for
+// filtering/display, so nothing from the source is ever lost.
+//
+// Employees (company-users) are scoped to this company by the source API.
+// Terminals and vehicles are NOT — the source returns its entire nationwide
+// tables for both (confirmed live: 728 terminals, ~19.8k vehicles across
+// every operator), mirrored here unfiltered by explicit choice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OtaSyncEntity {
+  EMPLOYEES
+  TERMINALS
+  VEHICLES
+}
+
+model OtaSyncLog {
+  id            String        @id @default(cuid())
+
+  entity        OtaSyncEntity
+  source        SyncSource
+  triggeredBy   String?       // AdminUser id when source = MANUAL, null for AUTO
+
+  status        SyncStatus    @default(SUCCESS)
+  pagesFetched  Int           @default(0)
+  rowsFetched   Int           @default(0)
+  rowsCreated   Int           @default(0)
+  rowsUpdated   Int           @default(0)
+  errorMessage  String?
+
+  sourceTotal   Int?
+  ourTotal      Int?
+
+  rateLimitedUntil DateTime?
+
+  startedAt     DateTime      @default(now())
+  finishedAt    DateTime?
+
+  @@index([entity, startedAt])
+  @@map("ota_sync_logs")
+}
+
+model OtaEmployee {
+  // OTA's own company_user.id, used directly as our primary key.
+  id                 String    @id
+
+  companyId          String
+  userId              String
+
+  fullName            String
+  phone               String?
+  email               String?
+
+  position            String?
+  department          String?
+  employeeIdExternal  String? // OTA's own "employee_id" field — distinct from id above
+  joiningDate         DateTime?
+  endDate             DateTime?
+  isActive            Boolean   @default(true)
+
+  roleName            String?
+  roleLabel           String?
+  userStatus          String?
+
+  terminalId          String?
+  terminalName        String?
+
+  raw                 Json
+
+  firstSeenAt         DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([isActive])
+  @@index([companyId])
+  @@map("ota_employees")
+}
+
+model OtaTerminal {
+  // OTA's own terminal id, used directly as our primary key.
+  id            String   @id
+
+  name          String
+  address       String?
+  status        String?
+
+  zoneName      String?
+  woredaName    String?
+  cityName      String?
+  companyNames  String? // comma-joined companies[] operating from this terminal
+
+  raw           Json
+
+  firstSeenAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([name])
+  @@map("ota_terminals")
+}
+
+model OtaVehicle {
+  // OTA's own vehicle id, used directly as our primary key.
+  id                    String   @id
+
+  plateNumber           String?
+  plateRegion           String?
+  seatCapacity          Int?
+  status                String?
+  isAssignedToRoute     Boolean?
+  driverName            String?
+  driverLicenceNumber   String?
+
+  fleetTypeName         String?
+  associationName       String?
+  assignedTerminalId    String?
+  assignedTerminalName  String?
+  vehicleLevelName      String?
+
+  raw                   Json
+
+  firstSeenAt           DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([status])
+  @@index([assignedTerminalId])
+  @@index([plateNumber])
+  @@map("ota_vehicles")
+}

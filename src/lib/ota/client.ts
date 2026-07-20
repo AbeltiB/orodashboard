@@ -159,6 +159,208 @@ export async function fetchAllOtaTrips(
   return { rows: allRows, pagesFetched: first.pages };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANY USERS (employee/account roster) — company-scoped, confirmed live
+// against /api/company-users. Nested objects are typed loosely (we keep the
+// full raw payload alongside the flattened columns, so nothing beyond these
+// commonly-useful fields needs to be pinned down exactly here).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OtaCompanyUser = {
+  id: string;
+  company_id: string;
+  user_id: string;
+  position: string | null;
+  department: string | null;
+  employee_id: string | null;
+  joining_date: string | null;
+  end_date: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  user: {
+    id: string;
+    full_name: string;
+    phone: string | null;
+    email: string | null;
+    status: string | null;
+    terminal_id: string | null;
+    terminal: { id: string; name: string } | null;
+    role: { id: string; name: string; description: string | null } | null;
+  } | null;
+  [key: string]: unknown;
+};
+
+type OtaCompanyUsersResponse = {
+  success?: boolean;
+  data?: OtaCompanyUser[];
+  pagination?: { total?: number; totalPages?: number };
+};
+
+export async function fetchAllOtaCompanyUsers(
+  config: OtaConfig,
+  options: { limit?: number; delayMs?: number; onPage?: (page: number, pages: number, rowsSoFar: number) => void } = {}
+): Promise<{ rows: OtaCompanyUser[]; pagesFetched: number; sourceTotal: number }> {
+  const limit = options.limit ?? 100;
+  const delayMs = options.delayMs ?? 200;
+  const { token } = await otaLogin(config);
+
+  async function fetchPage(page: number) {
+    const url = new URL(`${config.baseUrl}/api/company-users`);
+    url.searchParams.set("company_id", config.companyId);
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status === 429) {
+      const body = await res.json().catch(() => ({}) as { retryAfter?: number });
+      const headerRetry = Number(res.headers.get("Retry-After"));
+      throw new OtaRateLimitError(body.retryAfter ?? (Number.isFinite(headerRetry) ? headerRetry : 900));
+    }
+    if (!res.ok) throw new Error(`OTA company-users page ${page} failed (HTTP ${res.status})`);
+    const body = (await res.json()) as OtaCompanyUsersResponse;
+    return { rows: body.data ?? [], total: body.pagination?.total ?? 0, pages: body.pagination?.totalPages ?? 1 };
+  }
+
+  const first = await fetchPage(1);
+  const allRows = [...first.rows];
+  options.onPage?.(1, first.pages, allRows.length);
+  for (let page = 2; page <= first.pages; page++) {
+    const { rows } = await fetchPage(page);
+    allRows.push(...rows);
+    options.onPage?.(page, first.pages, allRows.length);
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return { rows: allRows, pagesFetched: first.pages, sourceTotal: first.total };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TERMINALS — NOT company-scoped: this returns OTA's entire nationwide
+// terminal table (confirmed live: 728 terminals across every operator, the
+// company_id/companyId filter params either error out or have no effect).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OtaTerminalRaw = {
+  id: string;
+  name: string;
+  address: string | null;
+  status: string | null;
+  created_at: string;
+  updated_at: string;
+  companies?: { id: string; name: string }[];
+  zone?: { id: string; name: string } | null;
+  woreda?: { id: string; name: string } | null;
+  city?: { id: string; name: string } | null;
+  [key: string]: unknown;
+};
+
+type OtaTerminalsResponse = {
+  status?: string;
+  data?: OtaTerminalRaw[];
+  pagination?: { total?: number; pages?: number };
+};
+
+export async function fetchAllOtaTerminals(
+  config: OtaConfig,
+  options: { limit?: number; delayMs?: number; onPage?: (page: number, pages: number, rowsSoFar: number) => void } = {}
+): Promise<{ rows: OtaTerminalRaw[]; pagesFetched: number; sourceTotal: number }> {
+  const limit = options.limit ?? 500;
+  const delayMs = options.delayMs ?? 200;
+  const { token } = await otaLogin(config);
+
+  async function fetchPage(page: number) {
+    const url = new URL(`${config.baseUrl}/api/terminals`);
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status === 429) {
+      const body = await res.json().catch(() => ({}) as { retryAfter?: number });
+      const headerRetry = Number(res.headers.get("Retry-After"));
+      throw new OtaRateLimitError(body.retryAfter ?? (Number.isFinite(headerRetry) ? headerRetry : 900));
+    }
+    if (!res.ok) throw new Error(`OTA terminals page ${page} failed (HTTP ${res.status})`);
+    const body = (await res.json()) as OtaTerminalsResponse;
+    return { rows: body.data ?? [], total: body.pagination?.total ?? 0, pages: body.pagination?.pages ?? 1 };
+  }
+
+  const first = await fetchPage(1);
+  const allRows = [...first.rows];
+  options.onPage?.(1, first.pages, allRows.length);
+  for (let page = 2; page <= first.pages; page++) {
+    const { rows } = await fetchPage(page);
+    allRows.push(...rows);
+    options.onPage?.(page, first.pages, allRows.length);
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return { rows: allRows, pagesFetched: first.pages, sourceTotal: first.total };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VEHICLES — also NOT company-scoped: OTA's entire nationwide vehicle fleet
+// (confirmed live: 19,758 vehicles). Mirrored unfiltered, per explicit
+// instruction — this is a large table, so syncs page through it at a large
+// page size (1000 tested working, ~20 requests total) to keep request count
+// down.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OtaVehicleRaw = {
+  id: string;
+  plate_number: string | null;
+  plate_region: string | null;
+  seat_capacity: number | null;
+  status: string | null;
+  is_assigned_to_route: boolean | null;
+  driver_name: string | null;
+  driver_licence_number: string | null;
+  assigned_terminal_id: string | null;
+  created_at: string;
+  updated_at: string;
+  fleetType?: { id: string; name: string } | null;
+  association?: { id: string; name: string } | null;
+  assignedTerminal?: { id: string; name: string } | null;
+  vehicleLevel?: { id: string; name: string } | null;
+  [key: string]: unknown;
+};
+
+type OtaVehiclesResponse = {
+  data?: OtaVehicleRaw[];
+  pagination?: { total?: number; totalPages?: number };
+};
+
+export async function fetchAllOtaVehicles(
+  config: OtaConfig,
+  options: { limit?: number; delayMs?: number; onPage?: (page: number, pages: number, rowsSoFar: number) => void } = {}
+): Promise<{ rows: OtaVehicleRaw[]; pagesFetched: number; sourceTotal: number }> {
+  const limit = options.limit ?? 1000;
+  const delayMs = options.delayMs ?? 200;
+  const { token } = await otaLogin(config);
+
+  async function fetchPage(page: number) {
+    const url = new URL(`${config.baseUrl}/api/vehicles`);
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("limit", String(limit));
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status === 429) {
+      const body = await res.json().catch(() => ({}) as { retryAfter?: number });
+      const headerRetry = Number(res.headers.get("Retry-After"));
+      throw new OtaRateLimitError(body.retryAfter ?? (Number.isFinite(headerRetry) ? headerRetry : 900));
+    }
+    if (!res.ok) throw new Error(`OTA vehicles page ${page} failed (HTTP ${res.status})`);
+    const body = (await res.json()) as OtaVehiclesResponse;
+    return { rows: body.data ?? [], total: body.pagination?.total ?? 0, pages: body.pagination?.totalPages ?? 1 };
+  }
+
+  const first = await fetchPage(1);
+  const allRows = [...first.rows];
+  options.onPage?.(1, first.pages, allRows.length);
+  for (let page = 2; page <= first.pages; page++) {
+    const { rows } = await fetchPage(page);
+    allRows.push(...rows);
+    options.onPage?.(page, first.pages, allRows.length);
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return { rows: allRows, pagesFetched: first.pages, sourceTotal: first.total };
+}
+
 // Flattens nested objects/arrays into dot-notation string values, mirroring
 // the Python script's CSV flattening so column names line up the same way.
 export function flattenTripRow(obj: OtaTripRow, prefix = ""): Record<string, string> {

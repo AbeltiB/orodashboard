@@ -7,6 +7,7 @@ import {
   X, Check, FileSpreadsheet, Printer, RefreshCw, AlertCircle,
 } from "lucide-react";
 import InfoTip from "@/components/InfoTip";
+import { exportCSV, exportHTML } from "@/lib/export";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,47 +49,6 @@ function fmtDate(iso: string | null) {
 }
 
 // ─── Export helpers — client-side, no extra deps ──────────────────────────────
-
-function exportCSV(filename: string, headers: string[], rows: (string | number)[][]) {
-  const csv = [headers, ...rows]
-    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href = url; a.download = filename + ".csv"; a.click();
-  URL.revokeObjectURL(url);
-}
-
-function exportHTML(filename: string, title: string, headers: string[], rows: (string | number)[][]) {
-  const rowsHtml = rows.map(r =>
-    `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`
-  ).join("");
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>${title}</title>
-    <style>
-      body { font-family: Arial, sans-serif; padding: 32px; color: #0f172a; }
-      h1 { font-size: 20px; margin-bottom: 4px; }
-      p.meta { font-size: 12px; color: #64748b; margin-bottom: 24px; }
-      table { width: 100%; border-collapse: collapse; font-size: 13px; }
-      th { background: #1d4ed8; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; }
-      td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; }
-      tr:nth-child(even) td { background: #f8fafc; }
-      @media print { body { padding: 16px; } }
-    </style>
-  </head><body>
-    <h1>${title}</h1>
-    <p class="meta">OroDashboard · Generated ${new Date().toLocaleString("en-GB")} · Exported as PDF-ready HTML</p>
-    <table>
-      <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
-  </body></html>`;
-  const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
-  const url  = URL.createObjectURL(blob);
-  const w    = window.open(url, "_blank");
-  if (w) setTimeout(() => w.print(), 600);
-}
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
@@ -264,7 +224,7 @@ function FareSummaryReport({ stations }: { stations: StationOption[] }) {
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
             onCSV={() => exportCSV("fare-summary", headers, rows)}
-            onPDF={() => exportHTML("fare-summary", "Fare Summary Report", headers, rows)}
+            onPDF={() => exportHTML("fare-summary", "Fare Summary Report", `${rows.length.toLocaleString()} records`, headers, rows)}
           />
         </div>
       </div>
@@ -328,7 +288,7 @@ function PettyCashLedger({ stations, supervisors }: { stations: StationOption[];
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
             onCSV={() => exportCSV("petty-cash-ledger", headers, rows)}
-            onPDF={() => exportHTML("petty-cash-ledger", "Petty Cash Ledger", headers, rows)}
+            onPDF={() => exportHTML("petty-cash-ledger", "Petty Cash Ledger", `${rows.length.toLocaleString()} records`, headers, rows)}
           />
         </div>
       </div>
@@ -398,7 +358,7 @@ function StaffRoster({ stations }: { stations: StationOption[] }) {
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
             onCSV={() => exportCSV("staff-roster", headers, rows)}
-            onPDF={() => exportHTML("staff-roster", "Staff Roster", headers, rows)}
+            onPDF={() => exportHTML("staff-roster", "Staff Roster", `${rows.length.toLocaleString()} records`, headers, rows)}
           />
         </div>
       </div>
@@ -475,7 +435,7 @@ function POSFleetReport({ stations }: { stations: StationOption[] }) {
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
             onCSV={() => exportCSV("pos-fleet", headers, rows)}
-            onPDF={() => exportHTML("pos-fleet", "POS Fleet Overview", headers, rows)}
+            onPDF={() => exportHTML("pos-fleet", "POS Fleet Overview", `${rows.length.toLocaleString()} records`, headers, rows)}
           />
         </div>
       </div>
@@ -542,7 +502,7 @@ function StationSummaryReport({ stations }: { stations: StationOption[] }) {
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
             onCSV={() => exportCSV("station-summary", headers, rows)}
-            onPDF={() => exportHTML("station-summary", "Station Summary", headers, rows)}
+            onPDF={() => exportHTML("station-summary", "Station Summary", `${rows.length.toLocaleString()} records`, headers, rows)}
           />
         </div>
       </div>
@@ -618,7 +578,7 @@ function SalesSummaryReport() {
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "flex-end" }}>
           <ExportBar
             onCSV={() => exportCSV("sales-summary", headers, rows)}
-            onPDF={() => exportHTML("sales-summary", "Sales Summary — Earnings per Ticketer", headers, rows)}
+            onPDF={() => exportHTML("sales-summary", "Sales Summary — Earnings per Ticketer", `${rows.length.toLocaleString()} records`, headers, rows)}
           />
         </div>
       </div>

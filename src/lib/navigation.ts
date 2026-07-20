@@ -8,7 +8,10 @@ import {
   FileBarChart,
   Settings,
   DollarSign,
-  TrendingUp
+  TrendingUp,
+  IdCard,
+  Landmark,
+  Truck,
 } from "lucide-react";
 
 export const navigation = [
@@ -50,6 +53,21 @@ export const navigation = [
     title: "Sales",
     href: "/dashboard/sales",
     icon: TrendingUp,
+  },
+  {
+    title: "OTA Employees",
+    href: "/dashboard/ota-employees",
+    icon: IdCard,
+  },
+  {
+    title: "OTA Terminals",
+    href: "/dashboard/ota-terminals",
+    icon: Landmark,
+  },
+  {
+    title: "OTA Vehicles",
+    href: "/dashboard/ota-vehicles",
+    icon: Truck,
   },
   {
     title: "Fare Matrix",
