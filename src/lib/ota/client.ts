@@ -238,13 +238,23 @@ export async function fetchAllOtaCompanyUsers(
 // via the endpoint's own validation errors: role_name (or role_id), full_name,
 // email, position, department. phone/employee_id/joining_date are accepted
 // but not required.
+// Required fields depend on the role (confirmed live): office roles like
+// company_staff/company_general_manager require position+department; the
+// company tickter role doesn't (OTA's own "Add Employee" UI for ticketers
+// asks for Terminal + Fayda ID instead, matching a physical terminal
+// assignment and national ID verification, and doesn't ask for position/
+// department at all). All of these are sent through as provided — OTA's own
+// validation is the source of truth for what a given role actually needs.
 export type CreateOtaCompanyUserInput = {
   fullName: string;
   email: string;
   phone?: string;
-  position: string;
-  department: string;
   roleName: string;
+  position?: string;
+  department?: string;
+  fayidaId?: string;
+  terminalId?: string;
+  isActive?: boolean;
   employeeId?: string;
   joiningDate?: string; // yyyy-mm-dd
 };
@@ -271,8 +281,11 @@ export async function createOtaCompanyUser(
       full_name: input.fullName,
       email: input.email,
       phone: input.phone || undefined,
-      position: input.position,
-      department: input.department,
+      position: input.position || undefined,
+      department: input.department || undefined,
+      fayida_id: input.fayidaId || undefined,
+      terminal_id: input.terminalId || undefined,
+      is_active: input.isActive,
       employee_id: input.employeeId || undefined,
       joining_date: input.joiningDate || undefined,
     }),

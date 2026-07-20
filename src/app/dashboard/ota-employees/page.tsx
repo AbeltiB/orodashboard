@@ -106,6 +106,7 @@ function Toast({ message, onDone }: { message: string; onDone: () => void }) {
 const PAGE_SIZE = 50;
 
 type RoleOption = { name: string; label: string };
+type TerminalOption = { id: string; name: string };
 
 const modalInputStyle: React.CSSProperties = {
   width: "100%", height: 40, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 9,
@@ -115,37 +116,57 @@ const modalLabelStyle: React.CSSProperties = {
   display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5,
 };
 
-function NewEmployeeModal({ roles, onClose, onCreated }: {
+// Confirmed live: only this role requires Terminal + Fayda ID instead of
+// Position/Department — matches OTA's own "Add Employee" UI, which only
+// shows Terminal + Fayda ID (no Position/Department fields at all).
+const TICKETER_ROLE = "company tickter";
+
+function NewEmployeeModal({ roles, terminals, onClose, onCreated }: {
   roles: RoleOption[];
+  terminals: TerminalOption[];
   onClose: () => void;
   onCreated: (message: string) => void;
 }) {
   const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [fayidaId, setFayidaId] = useState("");
+  const [terminalId, setTerminalId] = useState("");
   const [position, setPosition] = useState("");
   const [department, setDepartment] = useState("");
-  const [roleName, setRoleName] = useState(roles[0]?.name ?? "");
+  const [roleName, setRoleName] = useState(roles.find(r => r.name === TICKETER_ROLE)?.name ?? roles[0]?.name ?? TICKETER_ROLE);
   const [customRole, setCustomRole] = useState("");
+  const [isActive, setIsActive] = useState(true);
   const [employeeId, setEmployeeId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const effectiveRole = roleName === "__custom__" ? customRole.trim() : roleName;
-  const valid = fullName.trim() && email.trim() && position.trim() && department.trim() && effectiveRole;
+  const isTicketerRole = effectiveRole === TICKETER_ROLE;
+  const valid = fullName.trim() && email.trim() && effectiveRole
+    && (isTicketerRole || (position.trim() && department.trim()));
 
   async function handleSubmit() {
     if (!valid || saving) return;
     setSaving(true);
     setError(null);
     try {
+      // OTA's own create endpoint requires position+department for every
+      // role, including ticketers (confirmed live) — but its own "Add
+      // Employee" UI for ticketers doesn't ask for them, so we fill in the
+      // same sensible defaults it must be using behind the scenes, keeping
+      // this form as simple as the real one for the common case.
+      const effectivePosition = isTicketerRole ? "Ticketer" : position.trim();
+      const effectiveDepartment = isTicketerRole ? "Operations" : department.trim();
       const res = await fetch("/api/ota/employees", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fullName: fullName.trim(), email: email.trim(), phone: phone.trim() || undefined,
-          position: position.trim(), department: department.trim(), roleName: effectiveRole,
-          employeeId: employeeId.trim() || undefined,
+          roleName: effectiveRole,
+          position: effectivePosition, department: effectiveDepartment,
+          fayidaId: fayidaId.trim() || undefined, terminalId: terminalId || undefined,
+          isActive, employeeId: employeeId.trim() || undefined,
         }),
       });
       const json = await res.json();
@@ -160,10 +181,10 @@ function NewEmployeeModal({ roles, onClose, onCreated }: {
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgb(0 0 0 / 0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div style={{ width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", background: "var(--surface)", borderRadius: 16, border: "1px solid var(--border)", boxShadow: "0 20px 60px rgb(0 0 0 / 0.3)" }} onClick={e => e.stopPropagation()}>
+      <div style={{ width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", background: "var(--surface)", borderRadius: 16, border: "1px solid var(--border)", boxShadow: "0 20px 60px rgb(0 0 0 / 0.3)" }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px", borderBottom: "1px solid var(--border)" }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-            <UserPlus size={18} /> New OTA employee
+            <UserPlus size={18} /> Add employee
           </h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", padding: 4 }}><X size={18} /></button>
         </div>
@@ -184,43 +205,74 @@ function NewEmployeeModal({ roles, onClose, onCreated }: {
           )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div>
-              <label style={modalLabelStyle}>Full name *</label>
-              <input style={modalInputStyle} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Abebe Kebede" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={modalLabelStyle}>Name *</label>
+                <input style={modalInputStyle} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Enter employee's name" />
+              </div>
+              <div>
+                <label style={modalLabelStyle}>Phone No *</label>
+                <input style={modalInputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="Enter employee's phone number" />
+              </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
                 <label style={modalLabelStyle}>Email *</label>
-                <input type="email" style={modalInputStyle} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" />
+                <input type="email" style={modalInputStyle} value={email} onChange={e => setEmail(e.target.value)} placeholder="Enter employee's email" />
               </div>
               <div>
-                <label style={modalLabelStyle}>Phone</label>
-                <input style={modalInputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="+2519…" />
+                <label style={{ ...modalLabelStyle, display: "flex", alignItems: "center", gap: 4 }}>
+                  Fayda ID {isTicketerRole && "*"}
+                  <InfoTip text="Ethiopia's national digital ID — shown as required in OTA's own form for ticketers. Not enforced server-side in testing, but worth filling in for real records." size={11} />
+                </label>
+                <input style={modalInputStyle} value={fayidaId} onChange={e => setFayidaId(e.target.value)} placeholder="Enter employee's Fayda ID" />
               </div>
             </div>
+
+            {isTicketerRole ? (
+              <div>
+                <label style={modalLabelStyle}>Terminal *</label>
+                <select style={{ ...modalInputStyle, cursor: "pointer" }} value={terminalId} onChange={e => setTerminalId(e.target.value)}>
+                  <option value="">Select terminal</option>
+                  {terminals.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={modalLabelStyle}>Position *</label>
+                  <input style={modalInputStyle} value={position} onChange={e => setPosition(e.target.value)} placeholder="e.g. IT Staff" />
+                </div>
+                <div>
+                  <label style={modalLabelStyle}>Department *</label>
+                  <input style={modalInputStyle} value={department} onChange={e => setDepartment(e.target.value)} placeholder="e.g. Management" />
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
-                <label style={modalLabelStyle}>Position *</label>
-                <input style={modalInputStyle} value={position} onChange={e => setPosition(e.target.value)} placeholder="e.g. Ticketer" />
+                <label style={{ ...modalLabelStyle, display: "flex", alignItems: "center", gap: 4 }}>
+                  Role *
+                  <InfoTip text="OTA has no endpoint listing all valid roles — these are the roles already seen among your synced employees. Pick 'Custom' to type a different one exactly as OTA expects it." size={11} />
+                </label>
+                <select style={{ ...modalInputStyle, cursor: "pointer" }} value={roleName} onChange={e => setRoleName(e.target.value)}>
+                  {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
+                  <option value="__custom__">Custom…</option>
+                </select>
+                {roleName === "__custom__" && (
+                  <input style={{ ...modalInputStyle, marginTop: 8 }} value={customRole} onChange={e => setCustomRole(e.target.value)} placeholder="exact role_name OTA expects" />
+                )}
               </div>
               <div>
-                <label style={modalLabelStyle}>Department *</label>
-                <input style={modalInputStyle} value={department} onChange={e => setDepartment(e.target.value)} placeholder="e.g. Operations" />
+                <label style={modalLabelStyle}>Status *</label>
+                <select style={{ ...modalInputStyle, cursor: "pointer" }} value={isActive ? "active" : "inactive"} onChange={e => setIsActive(e.target.value === "active")}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
               </div>
             </div>
-            <div>
-              <label style={{ ...modalLabelStyle, display: "flex", alignItems: "center", gap: 4 }}>
-                Role *
-                <InfoTip text="OTA has no endpoint listing all valid roles — these are the roles already seen among your synced employees. Pick 'Custom' to type a different one exactly as OTA expects it." size={11} />
-              </label>
-              <select style={{ ...modalInputStyle, cursor: "pointer" }} value={roleName} onChange={e => setRoleName(e.target.value)}>
-                {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
-                <option value="__custom__">Custom…</option>
-              </select>
-              {roleName === "__custom__" && (
-                <input style={{ ...modalInputStyle, marginTop: 8 }} value={customRole} onChange={e => setCustomRole(e.target.value)} placeholder="exact role_name OTA expects" />
-              )}
-            </div>
+
             <div>
               <label style={modalLabelStyle}>Employee ID (optional)</label>
               <input style={modalInputStyle} value={employeeId} onChange={e => setEmployeeId(e.target.value)} placeholder="internal reference, if you use one" />
@@ -233,7 +285,7 @@ function NewEmployeeModal({ roles, onClose, onCreated }: {
             </button>
             <button onClick={handleSubmit} disabled={!valid || saving} style={{ flex: 1, height: 42, borderRadius: 10, border: "none", background: valid ? "var(--primary)" : "color-mix(in srgb, var(--primary) 45%, #94a3b8)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: valid ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
               {saving && <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />}
-              {saving ? "Creating in OTA…" : "Create in OTA"}
+              {saving ? "Registering…" : "Register"}
             </button>
           </div>
         </div>
@@ -262,6 +314,7 @@ export default function OtaEmployeesPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [terminals, setTerminals] = useState<TerminalOption[]>([]);
 
   const buildParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -298,10 +351,11 @@ export default function OtaEmployeesPage() {
 
   const loadRoles = useCallback(async () => {
     try {
-      const res = await apiFetch<{ roles: RoleOption[] }>("/api/ota/employees/filter-options");
+      const res = await apiFetch<{ roles: RoleOption[]; terminals: TerminalOption[] }>("/api/ota/employees/filter-options");
       setRoles(res.roles);
+      setTerminals(res.terminals);
     } catch {
-      // role dropdown just falls back to "Custom" entry
+      // role/terminal dropdowns just fall back to empty / "Custom" entry
     }
   }, []);
 
@@ -418,6 +472,7 @@ export default function OtaEmployeesPage() {
         {showCreateModal && (
           <NewEmployeeModal
             roles={roles}
+            terminals={terminals}
             onClose={() => setShowCreateModal(false)}
             onCreated={(message) => {
               setShowCreateModal(false);
