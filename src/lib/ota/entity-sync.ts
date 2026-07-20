@@ -10,17 +10,19 @@
 // session-pooler's connection cap (pool_size: 15 — confirmed live via
 // "max clients reached" errors at higher concurrency).
 import { prisma } from "@/lib/prisma";
-import type { Prisma, $Enums } from "@/generated/prisma/client";
+import { Prisma, type $Enums } from "@/generated/prisma/client";
 import {
   otaConfigFromEnv,
   OtaRateLimitError,
   fetchAllOtaCompanyUsers,
   fetchAllOtaTerminals,
   fetchAllOtaVehicles,
+  createOtaCompanyUser,
   type OtaConfig,
   type OtaCompanyUser,
   type OtaTerminalRaw,
   type OtaVehicleRaw,
+  type CreateOtaCompanyUserInput,
 } from "./client";
 
 const STALE_RUN_MS = 30 * 60 * 1000;
@@ -205,6 +207,20 @@ function mapEmployeeRow(cu: OtaCompanyUser): Record<string, unknown> {
   };
 }
 
+// Creates a real account in OTA (external write, not a mirror), then
+// immediately upserts the returned record into our local mirror using the
+// same mapper the sync uses, so it shows up without waiting for a re-sync.
+export async function createOtaEmployee(input: CreateOtaCompanyUserInput) {
+  const config = otaConfigFromEnv();
+  const created = await createOtaCompanyUser(config, input);
+  const data = mapEmployeeRow(created);
+  return prisma.otaEmployee.upsert({
+    where: { id: created.id },
+    create: { id: created.id, ...data },
+    update: data,
+  } as Prisma.OtaEmployeeUpsertArgs);
+}
+
 export async function runOtaEmployeeSync(options: RunOtaSyncOptions): Promise<OtaSyncResult> {
   return runOtaEntitySync<OtaCompanyUser>("EMPLOYEES", options, {
     countRows: () => prisma.otaEmployee.count(),
@@ -255,6 +271,10 @@ export async function runOtaTerminalSync(options: RunOtaSyncOptions): Promise<Ot
 // ─────────────────────────────────────────────────────────────────────────────
 
 function mapVehicleRow(v: OtaVehicleRaw): Record<string, unknown> {
+  // Confirmed live: essentially always 0 or 1 route per vehicle (none of
+  // ~19.8k sampled had more than one) — the first entry is the vehicle's
+  // current route, if it has one.
+  const route = v.vehicleTerminalDestinations?.[0]?.terminalDestination;
   return {
     plateNumber: v.plate_number,
     plateRegion: v.plate_region,
@@ -268,6 +288,9 @@ function mapVehicleRow(v: OtaVehicleRaw): Record<string, unknown> {
     assignedTerminalId: v.assigned_terminal_id,
     assignedTerminalName: v.assignedTerminal?.name ?? null,
     vehicleLevelName: v.vehicleLevel?.name ?? null,
+    departureTerminalName: route?.departureTerminal?.name ?? null,
+    arrivalTerminalName: route?.arrivalTerminal?.name ?? null,
+    routeDistanceKm: route?.distance ? new Prisma.Decimal(route.distance) : null,
     raw: v as unknown as Prisma.InputJsonValue,
   };
 }

@@ -22,9 +22,20 @@ type OtaVehicleRow = {
   assignedTerminalId: string | null;
   assignedTerminalName: string | null;
   vehicleLevelName: string | null;
+  departureTerminalName: string | null;
+  arrivalTerminalName: string | null;
+  routeDistanceKm: number | null;
+  usedInTrips: boolean;
   raw: unknown;
   firstSeenAt: string;
   updatedAt: string;
+};
+
+type FilterOptions = {
+  associations: string[];
+  fleetTypes: string[];
+  departureTerminals: string[];
+  arrivalTerminals: string[];
 };
 
 type SyncStatus = "SUCCESS" | "FAILED" | "PARTIAL" | "SKIPPED" | "RATE_LIMITED";
@@ -104,7 +115,12 @@ export default function OtaVehiclesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [status, setStatus] = useState("");
+  const [association, setAssociation] = useState("");
+  const [departureTerminal, setDepartureTerminal] = useState("");
+  const [arrivalTerminal, setArrivalTerminal] = useState("");
+  const [usedInTrips, setUsedInTrips] = useState(false);
   const [search, setSearch] = useState("");
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ associations: [], fleetTypes: [], departureTerminals: [], arrivalTerminals: [] });
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -118,9 +134,13 @@ export default function OtaVehiclesPage() {
   const buildParams = useCallback(() => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (association) params.set("association", association);
+    if (departureTerminal) params.set("departureTerminal", departureTerminal);
+    if (arrivalTerminal) params.set("arrivalTerminal", arrivalTerminal);
+    if (usedInTrips) params.set("usedInTrips", "true");
     if (search) params.set("search", search);
     return params;
-  }, [status, search]);
+  }, [status, association, departureTerminal, arrivalTerminal, usedInTrips, search]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -148,8 +168,18 @@ export default function OtaVehiclesPage() {
     }
   }, []);
 
+  const loadFilterOptions = useCallback(async () => {
+    try {
+      const res = await apiFetch<FilterOptions>("/api/ota/vehicles/filter-options");
+      setFilterOptions(res);
+    } catch {
+      // dropdowns just stay empty — the free-text search still works
+    }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadLogs(); }, [loadLogs]);
+  useEffect(() => { loadFilterOptions(); }, [loadFilterOptions]);
 
   async function handleSync() {
     setSyncing(true);
@@ -205,11 +235,12 @@ export default function OtaVehiclesPage() {
   async function handleExport(format: "csv" | "pdf") {
     setExporting(format);
     try {
-      const headers = ["Plate", "Region", "Seats", "Status", "On route", "Fleet type", "Association", "Vehicle level", "Assigned terminal", "Driver", "Licence no."];
+      const headers = ["Plate", "Region", "Seats", "Status", "On route", "Fleet type", "Association", "Vehicle level", "Departure", "Arrival", "Distance (km)", "Assigned terminal", "Driver", "Licence no.", "Used in your trips"];
       const exportRows: (string | number)[][] = rows.map(v => [
         v.plateNumber ?? "—", v.plateRegion ?? "—", v.seatCapacity ?? "—", v.status ?? "—",
         v.isAssignedToRoute ? "Yes" : "No", v.fleetTypeName ?? "—", v.associationName ?? "—",
-        v.vehicleLevelName ?? "—", v.assignedTerminalName ?? "—", v.driverName ?? "—", v.driverLicenceNumber ?? "—",
+        v.vehicleLevelName ?? "—", v.departureTerminalName ?? "—", v.arrivalTerminalName ?? "—", v.routeDistanceKm ?? "—",
+        v.assignedTerminalName ?? "—", v.driverName ?? "—", v.driverLicenceNumber ?? "—", v.usedInTrips ? "Yes" : "No",
       ]);
       const stamp = new Date().toISOString().slice(0, 10);
       if (format === "csv") exportCSV(`ota-vehicles-${stamp}`, headers, exportRows);
@@ -277,26 +308,59 @@ export default function OtaVehiclesPage() {
         )}
 
         {/* Filters */}
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 14, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</label>
-            <select style={{ ...iCss, cursor: "pointer" }} value={status} onChange={e => { setStatus(e.target.value); setOffset(0); }}>
-              <option value="">All</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</label>
+              <select style={{ ...iCss, cursor: "pointer" }} value={status} onChange={e => { setStatus(e.target.value); setOffset(0); }}>
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Association
+                <InfoTip text="OTA vehicles belong to an association, not a company directly — this is the closest first-class grouping the source data has." size={11} />
+              </label>
+              <select style={{ ...iCss, cursor: "pointer", maxWidth: 200 }} value={association} onChange={e => { setAssociation(e.target.value); setOffset(0); }}>
+                <option value="">All</option>
+                {filterOptions.associations.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Departure</label>
+              <select style={{ ...iCss, cursor: "pointer", maxWidth: 180 }} value={departureTerminal} onChange={e => { setDepartureTerminal(e.target.value); setOffset(0); }}>
+                <option value="">All</option>
+                {filterOptions.departureTerminals.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Arrival</label>
+              <select style={{ ...iCss, cursor: "pointer", maxWidth: 180 }} value={arrivalTerminal} onChange={e => { setArrivalTerminal(e.target.value); setOffset(0); }}>
+                <option value="">All</option>
+                {filterOptions.arrivalTerminals.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, height: 38, fontSize: 13, color: "var(--foreground)", cursor: "pointer" }}>
+              <input type="checkbox" checked={usedInTrips} onChange={e => { setUsedInTrips(e.target.checked); setOffset(0); }} style={{ width: 16, height: 16, cursor: "pointer" }} />
+              Used in your trips
+              <InfoTip text="Vehicles that appear in your synced Sales trips — the closest thing to 'this company's own fleet' available, since OTA vehicles aren't directly tied to a company." size={11} />
+            </label>
           </div>
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Search</label>
-            <input placeholder="Plate number, driver name, licence no…" style={iCss} value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} />
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => handleExport("csv")} disabled={exporting !== null} style={{ height: 38, padding: "0 14px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: "#16a34a" }}>
-              {exporting === "csv" ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <FileSpreadsheet size={14} />} CSV
-            </button>
-            <button onClick={() => handleExport("pdf")} disabled={exporting !== null} style={{ height: 38, padding: "0 14px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: "#dc2626" }}>
-              {exporting === "pdf" ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Printer size={14} />} PDF
-            </button>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Search</label>
+              <input placeholder="Plate number, driver name, licence no…" style={iCss} value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => handleExport("csv")} disabled={exporting !== null} style={{ height: 38, padding: "0 14px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: "#16a34a" }}>
+                {exporting === "csv" ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <FileSpreadsheet size={14} />} CSV
+              </button>
+              <button onClick={() => handleExport("pdf")} disabled={exporting !== null} style={{ height: 38, padding: "0 14px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: "#dc2626" }}>
+                {exporting === "pdf" ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Printer size={14} />} PDF
+              </button>
+            </div>
           </div>
         </div>
 
@@ -322,7 +386,7 @@ export default function OtaVehiclesPage() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
-                    {["", "Plate", "Seats", "Status", "Fleet type", "Association", "Level", "Assigned terminal", "Driver"].map(h => (
+                    {["", "Plate", "Status", "Association", "Route", "Assigned terminal", "Driver", "Your trips"].map(h => (
                       <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -339,19 +403,29 @@ export default function OtaVehiclesPage() {
                           <td style={{ padding: "10px 14px", fontWeight: 600, color: "var(--foreground)", fontFamily: "monospace", whiteSpace: "nowrap" }}>
                             {v.plateNumber ?? "—"}{v.plateRegion ? <span style={{ color: "var(--muted-foreground)", fontWeight: 400 }}> · {v.plateRegion}</span> : null}
                           </td>
-                          <td style={{ padding: "10px 14px", color: "var(--foreground)" }}>{v.seatCapacity ?? "—"}</td>
                           <td style={{ padding: "10px 14px" }}>
                             <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: v.status === "active" ? "#dcfce7" : "#f1f5f9", color: v.status === "active" ? "#16a34a" : "#64748b", textTransform: "capitalize" }}>{v.status ?? "—"}</span>
                           </td>
-                          <td style={{ padding: "10px 14px", color: "var(--muted-foreground)" }}>{v.fleetTypeName ?? "—"}</td>
-                          <td style={{ padding: "10px 14px", color: "var(--muted-foreground)" }}>{v.associationName ?? "—"}</td>
-                          <td style={{ padding: "10px 14px", color: "var(--muted-foreground)" }}>{v.vehicleLevelName ?? "—"}</td>
+                          <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{v.associationName ?? "—"}</td>
+                          <td style={{ padding: "10px 14px", color: "var(--foreground)", whiteSpace: "nowrap" }}>
+                            {v.departureTerminalName && v.arrivalTerminalName ? (
+                              <>
+                                {v.departureTerminalName} → {v.arrivalTerminalName}
+                                {v.routeDistanceKm != null && <span style={{ color: "var(--muted-foreground)" }}> ({v.routeDistanceKm.toFixed(0)} km)</span>}
+                              </>
+                            ) : "—"}
+                          </td>
                           <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{v.assignedTerminalName ?? "—"}</td>
                           <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{v.driverName ?? "—"}</td>
+                          <td style={{ padding: "10px 14px" }}>
+                            {v.usedInTrips
+                              ? <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#dcfce7", color: "#16a34a" }}>Yes</span>
+                              : <span style={{ color: "var(--muted-foreground)" }}>—</span>}
+                          </td>
                         </tr>
                         {isExpanded && (
                           <tr>
-                            <td colSpan={9} style={{ padding: 0, background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
+                            <td colSpan={8} style={{ padding: 0, background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
                               <div style={{ padding: 16 }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
                                   <Info size={12} /> Full payload from OTA

@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   IdCard, RefreshCw, Loader2, AlertCircle, Check, History,
   ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, Printer, Info,
+  UserPlus, X, ShieldAlert,
 } from "lucide-react";
 import { exportCSV, exportHTML } from "@/lib/export";
 import InfoTip from "@/components/InfoTip";
@@ -104,6 +105,143 @@ function Toast({ message, onDone }: { message: string; onDone: () => void }) {
 
 const PAGE_SIZE = 50;
 
+type RoleOption = { name: string; label: string };
+
+const modalInputStyle: React.CSSProperties = {
+  width: "100%", height: 40, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 9,
+  background: "var(--surface)", color: "var(--foreground)", fontSize: 13, outline: "none",
+};
+const modalLabelStyle: React.CSSProperties = {
+  display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5,
+};
+
+function NewEmployeeModal({ roles, onClose, onCreated }: {
+  roles: RoleOption[];
+  onClose: () => void;
+  onCreated: (message: string) => void;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [position, setPosition] = useState("");
+  const [department, setDepartment] = useState("");
+  const [roleName, setRoleName] = useState(roles[0]?.name ?? "");
+  const [customRole, setCustomRole] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const effectiveRole = roleName === "__custom__" ? customRole.trim() : roleName;
+  const valid = fullName.trim() && email.trim() && position.trim() && department.trim() && effectiveRole;
+
+  async function handleSubmit() {
+    if (!valid || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ota/employees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: fullName.trim(), email: email.trim(), phone: phone.trim() || undefined,
+          position: position.trim(), department: department.trim(), roleName: effectiveRole,
+          employeeId: employeeId.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message ?? json?.error ?? `Request failed: ${res.status}`);
+      onCreated(`${fullName.trim()} was created in OTA.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create employee.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgb(0 0 0 / 0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div style={{ width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", background: "var(--surface)", borderRadius: 16, border: "1px solid var(--border)", boxShadow: "0 20px 60px rgb(0 0 0 / 0.3)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 20px", borderBottom: "1px solid var(--border)" }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+            <UserPlus size={18} /> New OTA employee
+          </h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 10, marginBottom: 18 }}>
+            <ShieldAlert size={16} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span style={{ fontSize: 12.5, color: "#92400e", lineHeight: 1.5 }}>
+              This creates a <strong>real account in OTA&apos;s production ticketing system</strong> — not just in OroDashboard. Double-check the details before submitting.
+            </span>
+          </div>
+
+          {error && (
+            <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "var(--danger-bg)", borderRadius: 8, marginBottom: 16 }}>
+              <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+              <span style={{ fontSize: 13, color: "var(--danger)" }}>{error}</span>
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={modalLabelStyle}>Full name *</label>
+              <input style={modalInputStyle} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Abebe Kebede" />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={modalLabelStyle}>Email *</label>
+                <input type="email" style={modalInputStyle} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" />
+              </div>
+              <div>
+                <label style={modalLabelStyle}>Phone</label>
+                <input style={modalInputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="+2519…" />
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={modalLabelStyle}>Position *</label>
+                <input style={modalInputStyle} value={position} onChange={e => setPosition(e.target.value)} placeholder="e.g. Ticketer" />
+              </div>
+              <div>
+                <label style={modalLabelStyle}>Department *</label>
+                <input style={modalInputStyle} value={department} onChange={e => setDepartment(e.target.value)} placeholder="e.g. Operations" />
+              </div>
+            </div>
+            <div>
+              <label style={{ ...modalLabelStyle, display: "flex", alignItems: "center", gap: 4 }}>
+                Role *
+                <InfoTip text="OTA has no endpoint listing all valid roles — these are the roles already seen among your synced employees. Pick 'Custom' to type a different one exactly as OTA expects it." size={11} />
+              </label>
+              <select style={{ ...modalInputStyle, cursor: "pointer" }} value={roleName} onChange={e => setRoleName(e.target.value)}>
+                {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
+                <option value="__custom__">Custom…</option>
+              </select>
+              {roleName === "__custom__" && (
+                <input style={{ ...modalInputStyle, marginTop: 8 }} value={customRole} onChange={e => setCustomRole(e.target.value)} placeholder="exact role_name OTA expects" />
+              )}
+            </div>
+            <div>
+              <label style={modalLabelStyle}>Employee ID (optional)</label>
+              <input style={modalInputStyle} value={employeeId} onChange={e => setEmployeeId(e.target.value)} placeholder="internal reference, if you use one" />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+            <button onClick={onClose} style={{ flex: 1, height: 42, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--foreground)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+              Cancel
+            </button>
+            <button onClick={handleSubmit} disabled={!valid || saving} style={{ flex: 1, height: 42, borderRadius: 10, border: "none", background: valid ? "var(--primary)" : "color-mix(in srgb, var(--primary) 45%, #94a3b8)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: valid ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              {saving && <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} />}
+              {saving ? "Creating in OTA…" : "Create in OTA"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OtaEmployeesPage() {
   const [rows, setRows] = useState<OtaEmployeeRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -122,6 +260,8 @@ export default function OtaEmployeesPage() {
 
   const [logs, setLogs] = useState<SyncLogRow[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
 
   const buildParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -156,8 +296,18 @@ export default function OtaEmployeesPage() {
     }
   }, []);
 
+  const loadRoles = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ roles: RoleOption[] }>("/api/ota/employees/filter-options");
+      setRoles(res.roles);
+    } catch {
+      // role dropdown just falls back to "Custom" entry
+    }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadLogs(); }, [loadLogs]);
+  useEffect(() => { loadRoles(); }, [loadRoles]);
 
   async function handleSync() {
     setSyncing(true);
@@ -255,12 +405,29 @@ export default function OtaEmployeesPage() {
             <button onClick={() => setShowHistory(s => !s)} style={{ height: 40, padding: "0 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, color: "var(--foreground)" }}>
               <History size={15} /> Sync history
             </button>
-            <button onClick={handleSync} disabled={syncing} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, opacity: syncing ? 0.7 : 1 }}>
+            <button onClick={handleSync} disabled={syncing} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--foreground)", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, opacity: syncing ? 0.7 : 1 }}>
               {syncing ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={15} />}
               {syncing ? "Syncing…" : "Sync now"}
             </button>
+            <button onClick={() => setShowCreateModal(true)} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+              <UserPlus size={15} /> New employee
+            </button>
           </div>
         </div>
+
+        {showCreateModal && (
+          <NewEmployeeModal
+            roles={roles}
+            onClose={() => setShowCreateModal(false)}
+            onCreated={(message) => {
+              setShowCreateModal(false);
+              setToast(message);
+              setOffset(0);
+              load();
+              loadRoles();
+            }}
+          />
+        )}
 
         {showHistory && (
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 18 }}>

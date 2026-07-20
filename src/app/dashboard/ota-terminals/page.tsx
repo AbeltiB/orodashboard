@@ -99,6 +99,7 @@ export default function OtaTerminalsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [status, setStatus] = useState("");
+  const [company, setCompany] = useState("");
   const [search, setSearch] = useState("");
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -113,9 +114,10 @@ export default function OtaTerminalsPage() {
   const buildParams = useCallback(() => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
+    if (company) params.set("company", company);
     if (search) params.set("search", search);
     return params;
-  }, [status, search]);
+  }, [status, company, search]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -278,6 +280,13 @@ export default function OtaTerminalsPage() {
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
+          </div>
+          <div style={{ minWidth: 200 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Company
+              <InfoTip text="A terminal can serve several companies — this matches any terminal where the company name you type appears in its list of operating companies." size={11} />
+            </label>
+            <input placeholder="e.g. Alphatech…" style={iCss} value={company} onChange={e => { setCompany(e.target.value); setOffset(0); }} />
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Search</label>

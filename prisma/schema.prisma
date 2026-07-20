@@ -780,6 +780,13 @@ model OtaVehicle {
   assignedTerminalName  String?
   vehicleLevelName      String?
 
+  // The vehicle's current route, if it has one — flattened from the source's
+  // vehicleTerminalDestinations (confirmed live: essentially always 0 or 1
+  // entries per vehicle, never more).
+  departureTerminalName String?
+  arrivalTerminalName   String?
+  routeDistanceKm       Decimal? @db.Decimal(8, 2)
+
   raw                   Json
 
   firstSeenAt           DateTime @default(now())
@@ -788,5 +795,8 @@ model OtaVehicle {
   @@index([status])
   @@index([assignedTerminalId])
   @@index([plateNumber])
+  @@index([associationName])
+  @@index([departureTerminalName])
+  @@index([arrivalTerminalName])
   @@map("ota_vehicles")
 }

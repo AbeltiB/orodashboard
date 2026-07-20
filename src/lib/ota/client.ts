@@ -233,6 +233,73 @@ export async function fetchAllOtaCompanyUsers(
   return { rows: allRows, pagesFetched: first.pages, sourceTotal: first.total };
 }
 
+// Creates a real company-user account in OTA — a genuine write to the
+// external production system, not a mirror. Required fields confirmed live
+// via the endpoint's own validation errors: role_name (or role_id), full_name,
+// email, position, department. phone/employee_id/joining_date are accepted
+// but not required.
+export type CreateOtaCompanyUserInput = {
+  fullName: string;
+  email: string;
+  phone?: string;
+  position: string;
+  department: string;
+  roleName: string;
+  employeeId?: string;
+  joiningDate?: string; // yyyy-mm-dd
+};
+
+export class OtaCreateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OtaCreateError";
+  }
+}
+
+export async function createOtaCompanyUser(
+  config: OtaConfig,
+  input: CreateOtaCompanyUserInput
+): Promise<OtaCompanyUser> {
+  const { token } = await otaLogin(config);
+
+  const res = await fetch(`${config.baseUrl}/api/company-users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      company_id: config.companyId,
+      role_name: input.roleName,
+      full_name: input.fullName,
+      email: input.email,
+      phone: input.phone || undefined,
+      position: input.position,
+      department: input.department,
+      employee_id: input.employeeId || undefined,
+      joining_date: input.joiningDate || undefined,
+    }),
+  });
+
+  const body = await res.json().catch(() => ({}) as { success?: boolean; error?: string; data?: unknown });
+  if (!res.ok || body?.success === false) {
+    throw new OtaCreateError(body?.error ?? `OTA rejected the new employee (HTTP ${res.status}).`);
+  }
+
+  // The create endpoint's response splits { user_id, company_user }, unlike
+  // the list endpoint's nested { ...company_user, user }. Re-shape it to the
+  // same OtaCompanyUser shape the rest of the app expects, then fetch the
+  // freshly-created record in that shape so mapEmployeeRow can reuse it as-is.
+  const created = body.data as { user_id: string; company_user: Record<string, unknown> };
+  const companyUserId = created.company_user.id as string;
+
+  const getRes = await fetch(
+    `${config.baseUrl}/api/company-users?company_id=${config.companyId}&page=1&limit=200`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const getBody = (await getRes.json()) as OtaCompanyUsersResponse;
+  const full = getBody.data?.find((r) => r.id === companyUserId);
+  if (!full) throw new OtaCreateError("Employee was created in OTA but couldn't be re-fetched — refresh the sync to see it.");
+  return full;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TERMINALS — NOT company-scoped: this returns OTA's entire nationwide
 // terminal table (confirmed live: 728 terminals across every operator, the
@@ -318,6 +385,17 @@ export type OtaVehicleRaw = {
   association?: { id: string; name: string } | null;
   assignedTerminal?: { id: string; name: string } | null;
   vehicleLevel?: { id: string; name: string } | null;
+  // Almost always 0 or 1 entries in practice (confirmed live: none of ~19.8k
+  // vehicles sampled had more than one) — the route a vehicle is currently
+  // running, if any.
+  vehicleTerminalDestinations?: {
+    terminalDestination?: {
+      distance: string | null;
+      road_type: string | null;
+      departureTerminal?: { id: string; name: string } | null;
+      arrivalTerminal?: { id: string; name: string } | null;
+    } | null;
+  }[];
   [key: string]: unknown;
 };
 

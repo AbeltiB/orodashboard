@@ -27,10 +27,15 @@ export function buildOtaEmployeeWhere(searchParams: URLSearchParams): Prisma.Ota
 
 export function buildOtaTerminalWhere(searchParams: URLSearchParams): Prisma.OtaTerminalWhereInput {
   const status = searchParams.get("status")?.trim();
+  const company = searchParams.get("company")?.trim();
   const search = searchParams.get("search")?.trim();
 
   const where: Prisma.OtaTerminalWhereInput = {};
   if (status) where.status = status;
+  // companyNames is a comma-joined list (a terminal can serve several
+  // companies) — "contains" is the closest a plain string column gets to
+  // "one of these companies operates here".
+  if (company) where.companyNames = { contains: company, mode: "insensitive" };
   if (search) {
     where.OR = [
       { name: { contains: search, mode: "insensitive" } },
@@ -44,13 +49,19 @@ export function buildOtaTerminalWhere(searchParams: URLSearchParams): Prisma.Ota
 export function buildOtaVehicleWhere(searchParams: URLSearchParams): Prisma.OtaVehicleWhereInput {
   const status = searchParams.get("status")?.trim();
   const fleetType = searchParams.get("fleetType")?.trim();
+  const association = searchParams.get("association")?.trim();
   const assignedTerminalId = searchParams.get("assignedTerminalId")?.trim();
+  const departureTerminal = searchParams.get("departureTerminal")?.trim();
+  const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim();
   const search = searchParams.get("search")?.trim();
 
   const where: Prisma.OtaVehicleWhereInput = {};
   if (status) where.status = status;
   if (fleetType) where.fleetTypeName = fleetType;
+  if (association) where.associationName = association;
   if (assignedTerminalId) where.assignedTerminalId = assignedTerminalId;
+  if (departureTerminal) where.departureTerminalName = departureTerminal;
+  if (arrivalTerminal) where.arrivalTerminalName = arrivalTerminal;
   if (search) {
     where.OR = [
       { plateNumber: { contains: search, mode: "insensitive" } },
