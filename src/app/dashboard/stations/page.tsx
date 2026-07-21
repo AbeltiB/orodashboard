@@ -993,6 +993,24 @@ export default function StationsPage() {
               </button>
             </div>
           </div>
+
+          {/* Total stat cards */}
+          <div className="grid-4" style={{ gap: 12, marginBottom: 18 }}>
+            {[
+              { label: "Total stations", value: stations.length, icon: <MapPin size={16} />, color: "#2563eb", bg: "#dbeafe" },
+              { label: "Total terminals", value: stations.reduce((s, x) => s + x.counts.terminalsAsOrigin, 0), icon: <Navigation size={16} />, color: "#7c3aed", bg: "#ede9fe" },
+              { label: "Total employees", value: stations.reduce((s, x) => s + x.counts.employees, 0), icon: <Users size={16} />, color: "#16a34a", bg: "#dcfce7" },
+              { label: "Total POS machines", value: stations.reduce((s, x) => s + x.counts.posMachines, 0), icon: <Monitor size={16} />, color: "#d97706", bg: "#fef3c7" },
+            ].map(c => (
+              <div key={c.label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 9, background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{c.icon}</div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "var(--foreground)", lineHeight: 1, fontFamily: "monospace" }}>{loading ? "—" : c.value}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{c.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Split pane */}
@@ -1017,10 +1035,11 @@ export default function StationsPage() {
                   {search ? `No stations match "${search}"` : "No stations yet. Create one to get started."}
                 </div>
               )}
-              {!loading && filtered.map(s => {
+              {!loading && filtered.map((s, i) => {
                 const active = s.id === selected;
                 return (
                   <button key={s.id} onClick={() => setSelected(s.id)} style={{ display: "flex", alignItems: "center", width: "100%", textAlign: "left", padding: "14px 16px", border: "none", cursor: "pointer", borderBottom: "1px solid var(--border)", background: active ? "color-mix(in srgb, var(--primary) 7%, transparent)" : "transparent", borderLeft: `3px solid ${active ? "var(--primary)" : "transparent"}`, transition: "background 0.12s" }}>
+                    <span style={{ width: 18, flexShrink: 0, textAlign: "right", marginRight: 8, fontSize: 11, color: "var(--muted-foreground)", fontFamily: "monospace" }}>{i + 1}</span>
                     <div style={{ width: 36, height: 36, borderRadius: 9, background: active ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "var(--background)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginRight: 12 }}>
                       <MapPin size={15} color={active ? "var(--primary)" : "var(--muted-foreground)"} />
                     </div>

@@ -9,6 +9,9 @@ import {
   Loader2,
   MapPin,
   ArrowRight,
+  Route,
+  ArrowRightLeft,
+  ArrowDownToLine,
 } from "lucide-react";
 
 // ─── Types matching GET /api/terminals ───────────────────────────────────────
@@ -137,6 +140,24 @@ export default function TerminalsPage() {
         </div>
       </div>
 
+      {/* Total stat cards */}
+      <div className="grid-4" style={{ gap: 12, marginBottom: 24 }}>
+        {[
+          { label: "Total terminals", value: terminals.length, icon: <Navigation size={16} />, color: "#1d4ed8", bg: "#dbeafe" },
+          { label: "Departures", value: terminals.filter(t => t.isDeparture).length, icon: <ArrowDownToLine size={16} />, color: "#16a34a", bg: "#dcfce7" },
+          { label: "Arrivals", value: terminals.filter(t => t.isArrival).length, icon: <ArrowRightLeft size={16} />, color: "#7c3aed", bg: "#ede9fe" },
+          { label: "Linked stations", value: terminals.filter(t => t.linkedStation).length, icon: <Route size={16} />, color: "#d97706", bg: "#fef3c7" },
+        ].map(c => (
+          <div key={c.label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 9, background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{c.icon}</div>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "var(--foreground)", lineHeight: 1, fontFamily: "monospace" }}>{loading ? "—" : c.value}</div>
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{c.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Error */}
       {error && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#fee2e2", borderRadius: 10, marginBottom: 20, color: "#b91c1c", fontSize: 13 }}>
@@ -165,7 +186,8 @@ export default function TerminalsPage() {
       {/* Table */}
       {!loading && filtered.length > 0 && (
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 1fr 1fr 1fr 1fr 1fr", gap: 16, padding: "14px 20px", background: "var(--background)", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "36px 2fr 1.5fr 1fr 1fr 1fr 1fr 1fr", gap: 16, padding: "14px 20px", background: "var(--background)", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            <div>#</div>
             <div>Terminal</div>
             <div>Station</div>
             <div>Road</div>
@@ -175,15 +197,17 @@ export default function TerminalsPage() {
             <div>Linked station</div>
           </div>
 
-          {filtered.map((t) => (
+          {filtered.map((t, i) => (
             <div
               key={t.id}
               style={{
-                display: "grid", gridTemplateColumns: "2fr 1.5fr 1fr 1fr 1fr 1fr 1fr", gap: 16,
+                display: "grid", gridTemplateColumns: "36px 2fr 1.5fr 1fr 1fr 1fr 1fr 1fr", gap: 16,
                 alignItems: "center", padding: "14px 20px", borderBottom: "1px solid var(--border)",
                 fontSize: 13,
               }}
             >
+              <div style={{ color: "var(--muted-foreground)", fontFamily: "monospace", fontSize: 12 }}>{i + 1}</div>
+
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ width: 34, height: 34, borderRadius: 9, background: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <Navigation size={15} color="#1d4ed8" />

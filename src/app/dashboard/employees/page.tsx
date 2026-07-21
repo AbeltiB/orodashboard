@@ -5,7 +5,7 @@ import {
   User, Plus, Pencil, Trash2, X, Check, Search,
   AlertCircle, MapPin, Monitor, Wallet, ChevronRight,
   Eye, EyeOff, ChevronsUpDown, Calendar, Banknote,
-  Loader2,
+  Loader2, Users, Shield, CreditCard,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -805,6 +805,24 @@ export default function EmployeesPage() {
               <Plus size={16} strokeWidth={2.5} /> New employee
             </button>
           </div>
+
+          {/* Total stat cards */}
+          <div className="grid-4" style={{ gap: 12, marginBottom: 18 }}>
+            {[
+              { label: "Total employees", value: employees.length, icon: <Users size={16} />, color: "#2563eb", bg: "#dbeafe" },
+              { label: "Supervisors", value: employees.filter(e => e.role === "SUPERVISOR").length, icon: <Shield size={16} />, color: "#7c3aed", bg: "#ede9fe" },
+              { label: "Ticketers", value: employees.filter(e => e.role === "TICKETER").length, icon: <User size={16} />, color: "#16a34a", bg: "#dcfce7" },
+              { label: "Cashiers", value: employees.filter(e => e.role === "CASHIER").length, icon: <CreditCard size={16} />, color: "#d97706", bg: "#fef3c7" },
+            ].map(c => (
+              <div key={c.label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 9, background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{c.icon}</div>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "var(--foreground)", lineHeight: 1, fontFamily: "monospace" }}>{loading ? "—" : c.value}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{c.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Split pane */}
@@ -839,7 +857,7 @@ export default function EmployeesPage() {
               {!loading && filtered.length === 0 && (
                 <div style={{ padding: 24, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>No employees match your filters.</div>
               )}
-              {filtered.map(emp => {
+              {filtered.map((emp, i) => {
                 const isActive = emp.id === selected;
                 const rc = roleColor(emp.role);
                 return (
@@ -851,6 +869,8 @@ export default function EmployeesPage() {
                     borderLeft: `3px solid ${isActive ? "var(--primary)" : "transparent"}`,
                     transition: "background 0.12s",
                   }}>
+                    {/* Row number */}
+                    <span style={{ width: 18, flexShrink: 0, textAlign: "right", marginRight: 8, fontSize: 11, color: "var(--muted-foreground)", fontFamily: "monospace" }}>{i + 1}</span>
                     {/* Avatar */}
                     <div style={{ width: 38, height: 38, borderRadius: 11, background: rc.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginRight: 11 }}>
                       <span style={{ fontSize: 13, fontWeight: 800, color: rc.fg }}>{initials(emp)}</span>
