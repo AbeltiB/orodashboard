@@ -5,6 +5,7 @@ import { requireRole } from "@/lib/api-auth";
 import { badRequest, conflict, notFound, ok, serverError } from "@/lib/api-utils";
 import { updateAdminUserSchema } from "@/lib/schemas/settings";
 import { revokeAllSessionsForUser } from "@/lib/session";
+import { revokeAllTrustedDevicesForUser } from "@/lib/device";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -89,9 +90,11 @@ export async function PATCH(request: NextRequest, context: Context) {
     });
 
     // Deactivating an admin should end their access immediately, not just on
-    // their session's natural 7-day expiry.
+    // their session's natural 7-day expiry — including any device that
+    // could otherwise still use PIN sign-in.
     if (parsed.data.isActive === false) {
       await revokeAllSessionsForUser(id);
+      await revokeAllTrustedDevicesForUser(id);
     }
 
     return ok(user);

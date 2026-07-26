@@ -12,6 +12,8 @@ import {
   IdCard,
   Landmark,
   Truck,
+  Wallet,
+  Send,
 } from "lucide-react";
 
 export const navigation = [
@@ -79,6 +81,22 @@ export const navigation = [
     title: "Reports",
     href: "/dashboard/reports",
     icon: FileBarChart,
+  },
+
+  {
+    title: "Cashiers",
+    href: "/dashboard/cashiers",
+    icon: Wallet,
+  },
+  {
+    title: "Deposits",
+    href: "/dashboard/deposits",
+    icon: Landmark,
+  },
+  {
+    title: "Telegram",
+    href: "/dashboard/telegram",
+    icon: Send,
   },
 
   {

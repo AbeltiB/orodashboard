@@ -14,6 +14,7 @@ import {
   type PermissionPage,
 } from "@/lib/permissions";
 import { OTP_EXPIRY_MINUTES, OTP_MAX_ATTEMPTS, OTP_LOCKOUT_MINUTES } from "@/lib/otp-constants";
+import { PIN_LOCKOUT_MINUTES, PIN_MAX_ATTEMPTS } from "@/lib/pin-constants";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -493,6 +494,124 @@ function UserDetail({ user, isSelf, onEdit, onDelete, onToggleActive }: {
 // SECURITY SECTION
 // ═════════════════════════════════════════════════════════════════════════════
 
+function PinSignInCard() {
+  const [hasPinSet, setHasPinSet] = useState<boolean | null>(null);
+  const [pinSetAt, setPinSetAt] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  async function load() {
+    try {
+      const res = await apiFetch<{ hasPinSet: boolean; pinSetAt: string | null }>("/api/auth/pin/status");
+      setHasPinSet(res.hasPinSet);
+      setPinSetAt(res.pinSetAt);
+    } catch {
+      // non-critical — the card just won't show a status
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const pinsMatch = newPin.length === 4 && newPin === confirmPin;
+
+  async function handleSave() {
+    if (!pinsMatch || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch("/api/auth/pin/set", { method: "POST", body: JSON.stringify({ pin: newPin }) });
+      setEditing(false); setNewPin(""); setConfirmPin("");
+      setToast(hasPinSet ? "PIN changed." : "PIN set — you can now use it to sign in on this device.");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save PIN.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch("/api/auth/pin/clear", { method: "POST", body: JSON.stringify({}) });
+      setToast("PIN removed — you'll need a text code every time you sign in.");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove PIN.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const pinInputStyle: React.CSSProperties = { ...iCss, letterSpacing: "0.5em", fontFamily: "monospace", textAlign: "center" };
+
+  return (
+    <div style={{ marginBottom: 28, padding: "18px 20px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, position: "relative" }}>
+      {toast && (
+        <div style={{ position: "absolute", top: 14, right: 20, fontSize: 12, fontWeight: 600, color: "var(--success)", background: "var(--success-bg)", padding: "4px 10px", borderRadius: 999 }}>{toast}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: editing ? 16 : 0 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 8 }}>
+            <KeyRound size={15} color="var(--primary)" />
+            PIN sign-in
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 4 }}>
+            {hasPinSet === null ? "Loading…" : hasPinSet ? `Set up${pinSetAt ? ` on ${fmtDate(pinSetAt)}` : ""} — lets this device skip the text code.` : "Not set up — every sign-in currently needs a text code."}
+          </div>
+        </div>
+        {!editing && (
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            {hasPinSet && (
+              <button onClick={handleRemove} disabled={saving} style={{ height: 34, padding: "0 12px", borderRadius: 8, border: "1.5px solid #fecaca", background: "#fff5f5", fontSize: 12, cursor: "pointer", color: "#dc2626", fontWeight: 600 }}>
+                Remove
+              </button>
+            )}
+            <button onClick={() => setEditing(true)} style={{ height: 34, padding: "0 12px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--background)", fontSize: 12, cursor: "pointer", color: "var(--foreground)", fontWeight: 600 }}>
+              {hasPinSet ? "Change PIN" : "Set up PIN"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <div>
+          {error && <p style={{ fontSize: 12, color: "var(--danger)", marginBottom: 10 }}>{error}</p>}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5 }}>New PIN</label>
+              <input type="password" inputMode="numeric" maxLength={4} value={newPin}
+                onChange={e => setNewPin(e.target.value.replace(/\D/g, ""))} placeholder="••••" style={pinInputStyle} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 5 }}>Confirm PIN</label>
+              <input type="password" inputMode="numeric" maxLength={4} value={confirmPin}
+                onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ""))} placeholder="••••" style={pinInputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { setEditing(false); setNewPin(""); setConfirmPin(""); setError(null); }} style={{ height: 36, padding: "0 14px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--background)", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "var(--foreground)" }}>
+              Cancel
+            </button>
+            <button onClick={handleSave} disabled={!pinsMatch || saving} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "none", background: pinsMatch ? "var(--primary)" : "color-mix(in srgb, var(--primary) 45%, #94a3b8)", fontSize: 12, fontWeight: 600, cursor: pinsMatch ? "pointer" : "default", color: "#fff" }}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SecuritySection() {
   function Row({ label, desc, value }: { label: string; desc: string; value: string }) {
     return (
@@ -508,6 +627,8 @@ function SecuritySection() {
 
   return (
     <div>
+      <PinSignInCard />
+
       <div style={{ marginBottom: 24, display: "flex", gap: 10, padding: "12px 14px", background: "color-mix(in srgb, var(--primary) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)", borderRadius: 10 }}>
         <Info size={16} color="var(--primary)" style={{ flexShrink: 0, marginTop: 1 }} />
         <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: 0, lineHeight: 1.6 }}>
@@ -518,6 +639,9 @@ function SecuritySection() {
       <Row label="OTP expiry"       desc="How long a one-time code remains valid after being sent" value={`${OTP_EXPIRY_MINUTES} minutes`} />
       <Row label="Max failed OTP attempts" desc="Wrong-code attempts allowed before the account is locked" value={`${OTP_MAX_ATTEMPTS} attempts`} />
       <Row label="Lockout duration" desc="How long an account stays locked after too many failed attempts" value={`${OTP_LOCKOUT_MINUTES} minutes`} />
+      <Row label="Trusted device"   desc="How long a device can use PIN sign-in before needing OTP again" value="180 days" />
+      <Row label="Max failed PIN attempts" desc="Wrong-PIN attempts allowed before falling back to OTP" value={`${PIN_MAX_ATTEMPTS} attempts`} />
+      <Row label="PIN lockout duration" desc="How long PIN sign-in is paused after too many failed attempts" value={`${PIN_LOCKOUT_MINUTES} minutes`} />
     </div>
   );
 }

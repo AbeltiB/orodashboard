@@ -60,6 +60,10 @@ type FilterOptions = {
   departureTerminals: string[];
   arrivalTerminals: string[];
   employees: { id: string; name: string }[];
+  companies: string[];
+  vehicleAssociations: string[];
+  vehicleFleetCategories: string[];
+  levels: string[];
 };
 
 type TicketerRow = {
@@ -282,7 +286,18 @@ export default function SalesPage() {
   const [employeeId, setEmployeeId] = useState("");
   const [plateNo, setPlateNo] = useState("");
   const [search, setSearch] = useState("");
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ departureTerminals: [], arrivalTerminals: [], employees: [] });
+  const [companyName, setCompanyName] = useState("");
+  const [vehicleAssociation, setVehicleAssociation] = useState("");
+  const [vehicleFleetCategory, setVehicleFleetCategory] = useState("");
+  const [level, setLevel] = useState("");
+  const [minPassengers, setMinPassengers] = useState("");
+  const [maxPassengers, setMaxPassengers] = useState("");
+  const [minServiceCharge, setMinServiceCharge] = useState("");
+  const [maxServiceCharge, setMaxServiceCharge] = useState("");
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+    departureTerminals: [], arrivalTerminals: [], employees: [],
+    companies: [], vehicleAssociations: [], vehicleFleetCategories: [], levels: [],
+  });
 
   const [syncing, setSyncing] = useState(false);
   const [syncStatusLine, setSyncStatusLine] = useState<string | null>(null);
@@ -317,8 +332,20 @@ export default function SalesPage() {
     if (employeeId) params.set("employeeId", employeeId);
     if (plateNo) params.set("plateNo", plateNo);
     if (search) params.set("search", search);
+    if (companyName) params.set("companyName", companyName);
+    if (vehicleAssociation) params.set("vehicleAssociation", vehicleAssociation);
+    if (vehicleFleetCategory) params.set("vehicleFleetCategory", vehicleFleetCategory);
+    if (level) params.set("level", level);
+    if (minPassengers) params.set("minPassengers", minPassengers);
+    if (maxPassengers) params.set("maxPassengers", maxPassengers);
+    if (minServiceCharge) params.set("minServiceCharge", minServiceCharge);
+    if (maxServiceCharge) params.set("maxServiceCharge", maxServiceCharge);
     return params;
-  }, [dateFrom, dateTo, departureTerminal, arrivalTerminal, employeeId, plateNo, search]);
+  }, [
+    dateFrom, dateTo, departureTerminal, arrivalTerminal, employeeId, plateNo, search,
+    companyName, vehicleAssociation, vehicleFleetCategory, level,
+    minPassengers, maxPassengers, minServiceCharge, maxServiceCharge,
+  ]);
 
   const loadTrips = useCallback(async () => {
     setLoading(true);
@@ -516,9 +543,16 @@ export default function SalesPage() {
 
   function clearFilters() {
     setDateFrom(""); setDateTo(""); setDepartureTerminal(""); setArrivalTerminal("");
-    setEmployeeId(""); setPlateNo(""); setSearch(""); setOffset(0);
+    setEmployeeId(""); setPlateNo(""); setSearch("");
+    setCompanyName(""); setVehicleAssociation(""); setVehicleFleetCategory(""); setLevel("");
+    setMinPassengers(""); setMaxPassengers(""); setMinServiceCharge(""); setMaxServiceCharge("");
+    setOffset(0);
   }
-  const filtersActive = !!(dateFrom || dateTo || departureTerminal || arrivalTerminal || employeeId || plateNo || search);
+  const filtersActive = !!(
+    dateFrom || dateTo || departureTerminal || arrivalTerminal || employeeId || plateNo || search ||
+    companyName || vehicleAssociation || vehicleFleetCategory || level ||
+    minPassengers || maxPassengers || minServiceCharge || maxServiceCharge
+  );
 
   // Printing (and its "Save as PDF") happens in an actual browser tab, so it
   // needs a sane cap — CSV has none, since "no filter = everything" applies
@@ -723,6 +757,48 @@ export default function SalesPage() {
             </Field>
           </div>
 
+          <div className="grid-4" style={{ gap: 12, marginBottom: 12 }}>
+            <Field label="Company">
+              <select style={selCss} value={companyName} onChange={e => { setCompanyName(e.target.value); setOffset(0); }}>
+                <option value="">All companies</option>
+                {filterOptions.companies.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+            <Field label="Vehicle association">
+              <select style={selCss} value={vehicleAssociation} onChange={e => { setVehicleAssociation(e.target.value); setOffset(0); }}>
+                <option value="">All associations</option>
+                {filterOptions.vehicleAssociations.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </Field>
+            <Field label="Fleet category">
+              <select style={selCss} value={vehicleFleetCategory} onChange={e => { setVehicleFleetCategory(e.target.value); setOffset(0); }}>
+                <option value="">All categories</option>
+                {filterOptions.vehicleFleetCategories.map(f => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </Field>
+            <Field label="Service level">
+              <select style={selCss} value={level} onChange={e => { setLevel(e.target.value); setOffset(0); }}>
+                <option value="">All levels</option>
+                {filterOptions.levels.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid-4" style={{ gap: 12, marginBottom: 12 }}>
+            <Field label="Min passengers">
+              <input type="number" min={0} placeholder="0" style={iCss} value={minPassengers} onChange={e => { setMinPassengers(e.target.value); setOffset(0); }} />
+            </Field>
+            <Field label="Max passengers">
+              <input type="number" min={0} placeholder="Any" style={iCss} value={maxPassengers} onChange={e => { setMaxPassengers(e.target.value); setOffset(0); }} />
+            </Field>
+            <Field label="Min service charge (ETB)">
+              <input type="number" min={0} placeholder="0" style={iCss} value={minServiceCharge} onChange={e => { setMinServiceCharge(e.target.value); setOffset(0); }} />
+            </Field>
+            <Field label="Max service charge (ETB)">
+              <input type="number" min={0} placeholder="Any" style={iCss} value={maxServiceCharge} onChange={e => { setMaxServiceCharge(e.target.value); setOffset(0); }} />
+            </Field>
+          </div>
+
           <div className="grid-2" style={{ gap: 12, marginBottom: 12 }}>
             <Field label="Date from — Gregorian">
               <input type="date" style={iCss} value={dateFrom} onChange={e => { setDateFrom(e.target.value); setOffset(0); }} />
@@ -738,8 +814,8 @@ export default function SalesPage() {
             </Field>
           </div>
 
-          <Field label="Search (employee, station, plate)">
-            <input placeholder="Free-text search across employee, station and plate…" style={iCss} value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} />
+          <Field label="Search (employee, station, plate, company, association)">
+            <input placeholder="Free-text search across employee, station, plate, company and association…" style={iCss} value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} />
           </Field>
         </div>
 

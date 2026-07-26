@@ -544,6 +544,26 @@ export function parseIncludeDeleted(searchParams: URLSearchParams): boolean {
   return value === "true" || value === "1";
 }
 
+// Shared date-range filter builder. `dateTo` is always treated as inclusive
+// of that entire calendar day — implemented as an *exclusive* upper bound of
+// the next day's midnight rather than `lte` on the raw date string. `lte`
+// looks correct for date-only (@db.Date) columns, which are always stored at
+// midnight, but silently excludes the whole day for any column that carries
+// a time-of-day (e.g. SalesTrip.date) — a bare `new Date("2026-07-26")`
+// parses to 2026-07-26T00:00:00.000Z, so `lte` that value matches nothing
+// after midnight. Confirmed live: filtering Sales trips with
+// dateFrom=dateTo=today returned zero rows despite trips existing that day.
+export function dateRangeFilter(
+  dateFrom?: string | null,
+  dateTo?: string | null
+): { gte?: Date; lt?: Date } | undefined {
+  if (!dateFrom && !dateTo) return undefined;
+  return {
+    ...(dateFrom && { gte: new Date(dateFrom) }),
+    ...(dateTo && { lt: new Date(new Date(dateTo).getTime() + 24 * 60 * 60 * 1000) }),
+  };
+}
+
 export function parsePagination(
   searchParams: URLSearchParams,
   defaultLimit = 100,

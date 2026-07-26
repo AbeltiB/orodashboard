@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/api-auth";
 import {
   badRequest,
   created,
+  dateRangeFilter,
   notFound,
   ok,
   serverError,
@@ -51,12 +52,12 @@ export async function GET(request: NextRequest, context: Context) {
 
     const fromDate = searchParams.get("from");
     const toDate = searchParams.get("to");
+    const dateFilter = dateRangeFilter(fromDate, toDate);
 
     const records = await prisma.pettyCash.findMany({
       where: {
         employeeId: id,
-        ...(fromDate && { date: { gte: new Date(fromDate) } }),
-        ...(toDate && { date: { lte: new Date(toDate) } }),
+        ...(dateFilter && { date: dateFilter }),
       },
       orderBy: { date: "desc" },
     });

@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/api-auth";
 import {
   badRequest,
   created,
+  dateRangeFilter,
   ok,
   parseIncludeDeleted,
   parsePagination,
@@ -40,12 +41,8 @@ export async function GET(request: NextRequest) {
     if (stationId) where.stationId = stationId;
     if (employeeId) where.employeeId = employeeId;
     if (shiftType) where.shiftType = shiftType as Prisma.ShiftAssignmentWhereInput["shiftType"];
-    if (dateFrom || dateTo) {
-      where.date = {
-        ...(dateFrom && { gte: new Date(dateFrom) }),
-        ...(dateTo && { lte: new Date(dateTo) }),
-      };
-    }
+    const dateFilter = dateRangeFilter(dateFrom, dateTo);
+    if (dateFilter) where.date = dateFilter;
 
     const [shifts, total] = await Promise.all([
       prisma.shiftAssignment.findMany({

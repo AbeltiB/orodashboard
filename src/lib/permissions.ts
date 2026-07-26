@@ -16,6 +16,9 @@ export const PERMISSION_PAGES = [
   { page: "ota-vehicles", label: "OTA Vehicles" },
   { page: "fare-matrix", label: "Fare Price Matrix" },
   { page: "reports", label: "Reports" },
+  { page: "cashiers", label: "Cashiers" },
+  { page: "deposits", label: "Deposits" },
+  { page: "telegram", label: "Telegram Reporting" },
   { page: "settings", label: "Settings" },
 ] as const;
 

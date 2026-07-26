@@ -2,7 +2,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api-auth";
-import { badRequest, ok, serverError } from "@/lib/api-utils";
+import { badRequest, dateRangeFilter, ok, serverError } from "@/lib/api-utils";
 import { buildSalesTripWhere } from "@/lib/ota/sales-filters";
 
 /**
@@ -165,6 +165,7 @@ async function pettyCashLedger(params: URLSearchParams) {
   const employeeId = params.get("employeeId");
   const from = params.get("from");
   const to = params.get("to");
+  const dateFilter = dateRangeFilter(from, to);
 
   const records = await prisma.pettyCash.findMany({
     where: {
@@ -176,10 +177,7 @@ async function pettyCashLedger(params: URLSearchParams) {
         !stationId && {
           employee: { role: "SUPERVISOR" },
         }),
-      date: {
-        ...(from && { gte: new Date(from) }),
-        ...(to && { lte: new Date(to) }),
-      },
+      ...(dateFilter && { date: dateFilter }),
     },
     include: {
       employee: {

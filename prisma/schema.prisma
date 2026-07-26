@@ -195,6 +195,9 @@ model Terminal {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  cashierAssignments CashierTerminalAssignment[]
+  deposits           Deposit[]
+
   @@index([stationId, isDeleted])
   @@index([linkedStationId])
   @@map("terminals")
@@ -232,6 +235,14 @@ model Employee {
   isDeleted      Boolean     @default(false)
   deletedAt      DateTime?
 
+  // Cashier sign-in (deposit reconciliation portal) — separate PIN from
+  // OroDashboard admin accounts entirely; set/reset by an admin, never an
+  // OTP-derived flow like AdminUser's. See src/lib/cashier-session.ts.
+  cashierPinHash        String?
+  cashierPinAttempts    Int       @default(0)
+  cashierPinLockedUntil DateTime?
+  cashierPinSetAt       DateTime?
+
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -241,6 +252,9 @@ model Employee {
   zoneSupervisorOf    ZoneSupervisor[]
   posSessions         PosSession[]
   shiftAssignments    ShiftAssignment[]
+  cashierSessions     CashierSession[]
+  terminalAssignments CashierTerminalAssignment[]
+  deposits            Deposit[]
 
   @@index([stationId, isDeleted])
   @@index([role])
@@ -513,12 +527,23 @@ model AdminUser {
   // Lockout after repeated failed OTP attempts
   lockedUntil    DateTime?
 
+  // PIN sign-in (hashed via bcrypt — see src/lib/pin.ts, same helper the OTP
+  // code itself uses) — a faster path on a device that's already proven
+  // itself via OTP once. Lockout here is deliberately separate from the OTP
+  // lockout above: exhausting PIN attempts should just fall back to OTP,
+  // not lock the account out of signing in entirely.
+  pinHash        String?
+  pinAttempts    Int       @default(0)
+  pinLockedUntil DateTime?
+  pinSetAt       DateTime?
+
   lastLoginAt    DateTime?
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   sessions       Session[]
+  trustedDevices TrustedDevice[]
 
   @@index([role])
   @@index([isActive])
@@ -544,6 +569,295 @@ model Session {
   @@index([adminUserId])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+// A browser that's already proven itself via a full OTP sign-in once —
+// lets that browser use the faster PIN sign-in next time instead of asking
+// for OTP again. Deliberately separate from Session (much longer-lived, and
+// "trusted" is a different concept than "currently signed in").
+model TrustedDevice {
+  id          String    @id @default(cuid())
+
+  adminUserId String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  tokenHash   String    @unique // sha256(rawToken) — raw token only ever lives in the cookie
+  expiresAt   DateTime            // createdAt + 180 days, fixed — never slides
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+
+  userAgent   String?
+  ipAddress   String?
+
+  revokedAt   DateTime? // set on "forget this device" / admin deactivation; NULL = still valid
+
+  @@index([adminUserId])
+  @@index([expiresAt])
+  @@map("trusted_devices")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CASHIER DEPOSIT RECONCILIATION — a cashier (an Employee, existing or newly
+// created) is put in charge of depositing one or more terminals' daily cash
+// collections. They sign into a separate, lightweight portal (phone + PIN,
+// distinct from the AdminUser/OTP world entirely) to see what they owe for
+// the day and submit the bank/mobile-money reference number once they've
+// deposited it. That reference is verified against verify.et (see
+// src/lib/verify-et/client.ts) so the amount, sender, and timestamp are
+// confirmed independently rather than just trusted from typed input.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CashierSession {
+  id          String    @id @default(cuid())
+
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  tokenHash   String    @unique // sha256(rawToken) — raw token only ever lives in the cookie
+  expiresAt   DateTime            // createdAt + 7 days, fixed — never slides
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+
+  userAgent   String?
+  ipAddress   String?
+
+  revokedAt   DateTime? // set on logout / admin unassigning this cashier; NULL = still valid
+
+  @@index([employeeId])
+  @@index([expiresAt])
+  @@map("cashier_sessions")
+}
+
+// Which terminal(s) a cashier is responsible for depositing. Many-to-many so
+// one employee can cover several terminals and (in principle) a terminal
+// could have more than one cashier rotating through it.
+model CashierTerminalAssignment {
+  id          String    @id @default(cuid())
+
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  terminalId  String
+  terminal    Terminal  @relation(fields: [terminalId], references: [id], onDelete: Cascade)
+
+  isActive    Boolean   @default(true)
+  assignedAt  DateTime  @default(now())
+  assignedBy  String?   // AdminUser id
+
+  @@unique([employeeId, terminalId])
+  @@index([terminalId, isActive])
+  @@map("cashier_terminal_assignments")
+}
+
+enum DepositStatus {
+  AWAITING_SUBMISSION // expected amount computed, cashier hasn't submitted a reference yet
+  SUBMITTED           // reference submitted; verify.et request queued/in flight
+  VERIFIED_OK         // verify.et confirmed the payment and the amount matches (within tolerance)
+  VERIFIED_MISMATCH   // verify.et confirmed the payment but the amount differs from what was expected
+  FAILED              // verify.et couldn't confirm the payment (invalid reference, wrong bank, etc.)
+  RESOLVED            // an admin has written a reason for a mismatch/failure and closed it out
+}
+
+// One row per cashier + terminal + business day. `expectedAmount` is the sum
+// of that terminal's SalesTrip departures for the day (kept live/recomputed
+// while still AWAITING_SUBMISSION, frozen once a verification completes) —
+// see computeExpectedDeposit() in src/lib/deposits.ts.
+model Deposit {
+  id                    String        @id @default(cuid())
+
+  employeeId            String
+  employee              Employee      @relation(fields: [employeeId], references: [id])
+
+  terminalId            String
+  terminal              Terminal      @relation(fields: [terminalId], references: [id])
+
+  date                  DateTime      @db.Date
+
+  expectedAmount        Decimal       @db.Decimal(12, 2)
+
+  // What the cashier submitted — bank is one of verify.et's supported keys
+  // (cbe/boa/telebirr/mpesa/cbebirr/dashen/awash/siinqee/kaafiebirr).
+  bank                  String?
+  referenceNumber       String?
+  accountSuffix         String?       // required by cbe/boa
+  phoneNumber           String?       // required by cbebirr, optional elsewhere
+
+  status                DepositStatus @default(AWAITING_SUBMISSION)
+
+  // verify.et's own request id — used to poll /api/verify/:requestId when the
+  // initial submit came back 202 (queued) instead of a synchronous result.
+  verifyRequestId       String?       @unique
+  verifiedAmount        Decimal?      @db.Decimal(12, 2)
+  currency              String?
+  senderName            String?
+  receiverName          String?
+  receiverAccount       String?
+  verifiedAt            DateTime?
+  verifyErrorMessage    String?
+  rawVerifyResponse     Json?
+
+  // Set once a verification lands as VERIFIED_MISMATCH — signed, so a
+  // shortfall is negative and an overage is positive.
+  discrepancyAmount     Decimal?      @db.Decimal(12, 2)
+  discrepancyReason     String?
+  discrepancyResolvedBy String?       // AdminUser id
+  discrepancyResolvedAt DateTime?
+
+  submittedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@unique([employeeId, terminalId, date])
+  @@index([terminalId, date])
+  @@index([date])
+  @@index([status])
+  @@map("deposits")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TELEGRAM REPORTING — daily/custom text reports sent to admin-chosen
+// recipients over Telegram. A bot can't DM an arbitrary phone number (Bot API
+// limitation), so each recipient links themselves once via a one-time
+// `https://t.me/<bot>?start=<linkToken>` deep link (see src/lib/telegram/*);
+// after that their telegramChatId is known and reports can be pushed to them
+// directly, fully controlled from the admin dashboard.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum TelegramReportType {
+  DAILY_SALES_SUMMARY
+  DAILY_DEPOSITS_SUMMARY
+  CUSTOM
+}
+
+enum TelegramReportFor {
+  TODAY
+  YESTERDAY
+}
+
+enum TelegramMessageStatus {
+  SENT
+  FAILED
+}
+
+enum TelegramFrequency {
+  DAILY         // every day
+  EVERY_N_DAYS  // every `intervalDays` days, counted from `anchorDate`
+  WEEKLY        // every week on `weekday`
+  MONTHLY       // every month on `dayOfMonth` (clamped to that month's length)
+  QUARTERLY     // every Jan/Apr/Jul/Oct on `dayOfMonth`
+  YEARLY        // every year on `monthOfYear`/`dayOfMonth`
+}
+
+model TelegramRecipient {
+  id                String    @id @default(cuid())
+
+  label             String    // admin's own name for this person, e.g. "Abelti (Owner)"
+  phone             String?   // optional note only — Telegram linking never uses this
+
+  // One-time deep-link token (?start=<linkToken>) — consumed the moment the
+  // recipient's first /start message is polled (see runUpdatesPoll).
+  linkToken         String    @unique
+  telegramChatId    String?   @unique
+  telegramUsername  String?
+  telegramFirstName String?
+  linkedAt          DateTime?
+
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  schedules         TelegramScheduleRecipient[]
+  messages          TelegramMessageLog[]
+
+  @@index([isActive])
+  @@map("telegram_recipients")
+}
+
+// A recurring report — "daily sales at 08:00", "daily deposits at 21:00",
+// or a recurring custom message. One-off custom sends (see
+// POST /api/telegram/send-custom) don't create a row here at all.
+model TelegramSchedule {
+  id              String              @id @default(cuid())
+
+  name            String
+  reportType      TelegramReportType
+  // Which calendar day the report covers — ignored for CUSTOM. Lets the same
+  // "daily sales" type be scheduled either as a morning recap of yesterday
+  // or an evening recap of today.
+  reportFor       TelegramReportFor   @default(YESTERDAY)
+  messageTemplate String?             // required for CUSTOM; supports a {{date}} placeholder
+  // DAILY_SALES_SUMMARY/DAILY_DEPOSITS_SUMMARY only — also attaches a
+  // multi-sheet Excel workbook (full row-level detail + per-station/
+  // ticketer/route rollups) alongside the short text recap.
+  includeDetailedFile Boolean         @default(false)
+
+  // How often this recurs — see TelegramFrequency. Each schedule has its own
+  // independent cadence, so a daily, a weekly, and a monthly report can all
+  // be active at once without interfering with each other.
+  frequency       TelegramFrequency   @default(DAILY)
+  intervalDays    Int?                // EVERY_N_DAYS: fire every N days
+  anchorDate      DateTime?           @db.Date // EVERY_N_DAYS: reference day-zero for the N-day cycle
+  weekday         Int?                // WEEKLY: 0 (Sunday) - 6 (Saturday)
+  dayOfMonth      Int?                // MONTHLY/QUARTERLY/YEARLY: 1-31, clamped to the actual month length
+  monthOfYear     Int?                // YEARLY: 1-12
+
+  // Local time-of-day in Africa/Addis_Ababa (fixed — the business operates
+  // in one timezone, EAT has no DST) that this fires on its due day.
+  sendHour        Int
+  sendMinute      Int
+
+  isActive        Boolean             @default(true)
+  // Dedup guard for runDueSchedules — the calendar day (Addis time) this
+  // last actually fired, so a cron polling every few minutes doesn't send
+  // the same day's report twice.
+  lastRunDate     DateTime?           @db.Date
+  lastRunStatus   String?
+
+  createdBy       String?             // AdminUser id
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  recipients      TelegramScheduleRecipient[]
+  messages        TelegramMessageLog[]
+
+  @@index([isActive])
+  @@map("telegram_schedules")
+}
+
+model TelegramScheduleRecipient {
+  id          String            @id @default(cuid())
+
+  scheduleId  String
+  schedule    TelegramSchedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  recipientId String
+  recipient   TelegramRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, recipientId])
+  @@index([recipientId])
+  @@map("telegram_schedule_recipients")
+}
+
+model TelegramMessageLog {
+  id           String                 @id @default(cuid())
+
+  scheduleId   String?                // null for one-off custom sends
+  schedule     TelegramSchedule?      @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+
+  recipientId  String
+  recipient    TelegramRecipient      @relation(fields: [recipientId], references: [id])
+
+  reportType   TelegramReportType
+  content      String
+  status       TelegramMessageStatus
+  errorMessage String?
+
+  sentAt       DateTime               @default(now())
+
+  @@index([recipientId])
+  @@index([scheduleId])
+  @@index([sentAt])
+  @@map("telegram_message_logs")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

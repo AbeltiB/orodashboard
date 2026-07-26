@@ -1,12 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { KeyRound, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { KeyRound, Loader2, AlertCircle, CheckCircle2, Lock } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Step = "phone" | "otp_sent";
+type Step = "phone" | "pin" | "otp_sent" | "set_pin";
+type LoginMethod = "pin" | "otp";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ async function apiFetch<T>(path: string, body: object): Promise<T> {
   });
   const json = await res.json();
   if (!res.ok) {
-    throw new ApiError(json?.message ?? json?.error ?? `Error ${res.status}`, json?.lockedUntil);
+    throw new ApiError(json?.message ?? json?.error ?? `Error ${res.status}`, json?.lockedUntil ?? json?.pinLockedUntil);
   }
   return json as T;
 }
@@ -134,19 +135,34 @@ export default function LoginPage() {
   const [phone, setPhone] = useState("");
   const [phoneFocused, setPhoneFocused] = useState(false);
 
+  const [pinCode, setPinCode] = useState("");
+  const [pinFocused, setPinFocused] = useState(false);
+
   const [otpCode, setOtpCode] = useState("");
   const [otpFocused, setOtpFocused] = useState(false);
+
+  // Whether this OTP round is a "forgot PIN" reset — if so, the set_pin
+  // step after verify is mandatory (no "skip"), since the old PIN is gone.
+  const [cameFromForgotPin, setCameFromForgotPin] = useState(false);
+  const [newPin, setNewPin] = useState("");
+  const [newPinFocused, setNewPinFocused] = useState(false);
+  const [confirmPin, setConfirmPin] = useState("");
+  const [confirmPinFocused, setConfirmPinFocused] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const pinInputRef = useRef<HTMLInputElement>(null);
   const otpInputRef = useRef<HTMLInputElement>(null);
+  const newPinInputRef = useRef<HTMLInputElement>(null);
 
   const phoneValid = phone.length === 9 && /^[79]/.test(phone);
 
   useEffect(() => {
+    if (step === "pin") pinInputRef.current?.focus();
     if (step === "otp_sent") otpInputRef.current?.focus();
+    if (step === "set_pin") newPinInputRef.current?.focus();
   }, [step]);
 
   function lockedMessage(e: ApiError) {
@@ -155,11 +171,47 @@ export default function LoginPage() {
     return `${e.message} Try again after ${until}.`;
   }
 
-  // ── Step 1 — request an OTP ────────────────────────────────────────────────
+  // ── Step 1 — phone -> decide PIN or OTP ────────────────────────────────────
 
-  async function handleSendOtp() {
+  async function handleStartLogin() {
     if (!phoneValid || loading) return;
     setLoading(true); setError(null); setSuccess(null);
+    try {
+      const res = await apiFetch<{ method: LoginMethod; message?: string }>("/api/auth/login/start", { phone: `+251${phone}` });
+      if (res.method === "pin") {
+        setStep("pin");
+        setPinCode("");
+      } else {
+        setSuccess(`A 6-digit code was sent to ${maskPhone(phone)}.`);
+        setStep("otp_sent");
+        setOtpCode("");
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? lockedMessage(e) : "Failed to start sign-in. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Step 2a — PIN sign-in ───────────────────────────────────────────────────
+
+  async function handleVerifyPin() {
+    if (pinCode.length !== 4 || loading) return;
+    setLoading(true); setError(null);
+    try {
+      await apiFetch("/api/auth/pin/verify", { phone: `+251${phone}`, pin: pinCode });
+      router.push("/dashboard");
+    } catch (e) {
+      setError(e instanceof ApiError ? lockedMessage(e) : "Incorrect PIN.");
+      setPinCode("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleUseOtpInstead() {
+    setLoading(true); setError(null); setSuccess(null);
+    setCameFromForgotPin(true);
     try {
       await apiFetch("/api/auth/otp/send", { phone: `+251${phone}` });
       setSuccess(`A 6-digit code was sent to ${maskPhone(phone)}.`);
@@ -171,6 +223,8 @@ export default function LoginPage() {
       setLoading(false);
     }
   }
+
+  // ── Step 2b — OTP sign-in ───────────────────────────────────────────────────
 
   async function handleResendOtp() {
     setLoading(true); setError(null); setSuccess(null);
@@ -185,14 +239,17 @@ export default function LoginPage() {
     }
   }
 
-  // ── Step 2 — verify the OTP and sign in ────────────────────────────────────
-
   async function handleVerifyOtp() {
     if (otpCode.length !== 6 || loading) return;
     setLoading(true); setError(null);
     try {
-      await apiFetch("/api/auth/otp/verify", { phone: `+251${phone}`, otp: otpCode });
-      router.push("/dashboard");
+      const res = await apiFetch<{ needsPinSetup?: boolean }>("/api/auth/otp/verify", { phone: `+251${phone}`, otp: otpCode });
+      if (res.needsPinSetup || cameFromForgotPin) {
+        setNewPin(""); setConfirmPin("");
+        setStep("set_pin");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (e) {
       setError(e instanceof ApiError ? lockedMessage(e) : "Invalid or expired code.");
       setOtpCode("");
@@ -201,17 +258,40 @@ export default function LoginPage() {
     }
   }
 
+  // ── Step 3 — set up / reset PIN ─────────────────────────────────────────────
+
+  const pinsMatch = newPin.length === 4 && newPin === confirmPin;
+
+  async function handleSetPin() {
+    if (!pinsMatch || loading) return;
+    setLoading(true); setError(null);
+    try {
+      await apiFetch("/api/auth/pin/set", { pin: newPin });
+      router.push("/dashboard");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to save PIN.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function goBack() {
     setStep("phone");
-    setOtpCode("");
+    setPinCode(""); setOtpCode("");
+    setCameFromForgotPin(false);
     setError(null); setSuccess(null);
   }
 
   // ── Shared header ──────────────────────────────────────────────────────────
 
   const STEP_META: Record<Step, { title: string; sub: string }> = {
-    phone: { title: "Admin sign in", sub: "Enter your registered phone number — we'll text you a code." },
+    phone: { title: "Admin sign in", sub: "Enter your registered phone number." },
+    pin: { title: "Enter your PIN", sub: `Signed in before as ${maskPhone(phone)} — enter your PIN to continue.` },
     otp_sent: { title: "Check your phone", sub: `Enter the 6-digit code sent to ${maskPhone(phone)}.` },
+    set_pin: {
+      title: cameFromForgotPin ? "Reset your PIN" : "Set up a PIN",
+      sub: "Choose a 4-digit PIN so you don't need a text code every time you sign in on this device.",
+    },
   };
 
   const meta = STEP_META[step];
@@ -280,7 +360,7 @@ export default function LoginPage() {
                       placeholder="9XXXXXXXX or 7XXXXXXXX"
                       value={phone}
                       onChange={e => { setPhone(e.target.value.replace(/\D/g, "")); setError(null); }}
-                      onKeyDown={e => e.key === "Enter" && handleSendOtp()}
+                      onKeyDown={e => e.key === "Enter" && handleStartLogin()}
                       onFocus={() => setPhoneFocused(true)}
                       onBlur={() => setPhoneFocused(false)}
                       autoFocus
@@ -290,9 +370,49 @@ export default function LoginPage() {
                   <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 6 }}>9 digits, no leading zero</p>
                 </div>
 
-                <button onClick={handleSendOtp} disabled={!phoneValid || loading} style={primaryBtn(phoneValid && !loading)}>
+                <button onClick={handleStartLogin} disabled={!phoneValid || loading} style={primaryBtn(phoneValid && !loading)}>
                   {loading ? <Spinner /> : <KeyRound size={17} strokeWidth={2.2} />}
-                  {loading ? "Sending…" : "Send code"}
+                  {loading ? "Checking…" : "Continue"}
+                </button>
+              </>
+            )}
+
+            {/* ── STEP: pin ── */}
+            {step === "pin" && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, padding: "10px 12px", background: "var(--background)", borderRadius: 9, border: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
+                    Signing in as <strong style={{ color: "var(--foreground)" }}>+251{phone}</strong>
+                  </span>
+                  <button onClick={goBack} style={{ fontSize: 12, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: 0 }}>
+                    ← change
+                  </button>
+                </div>
+
+                <label style={labelStyle}>4-digit PIN</label>
+                <div style={wrapStyle(pinFocused)}>
+                  <input
+                    ref={pinInputRef}
+                    type="password" inputMode="numeric" maxLength={4}
+                    value={pinCode}
+                    onChange={e => { setPinCode(e.target.value.replace(/\D/g, "")); setError(null); }}
+                    onKeyDown={e => e.key === "Enter" && pinCode.length === 4 && handleVerifyPin()}
+                    onFocus={() => setPinFocused(true)}
+                    onBlur={() => setPinFocused(false)}
+                    style={{ ...baseInputStyle, letterSpacing: "0.5em", fontFamily: "monospace" }}
+                    placeholder="••••"
+                  />
+                </div>
+
+                <div style={{ marginTop: 20 }}>
+                  <button onClick={handleVerifyPin} disabled={pinCode.length !== 4 || loading} style={primaryBtn(pinCode.length === 4 && !loading)}>
+                    {loading ? <Spinner /> : <Lock size={16} strokeWidth={2.2} />}
+                    {loading ? "Signing in…" : "Sign in"}
+                  </button>
+                </div>
+
+                <button style={ghostBtn()} onClick={handleUseOtpInstead} disabled={loading}>
+                  Forgot PIN? Use a text code instead
                 </button>
               </>
             )}
@@ -338,6 +458,59 @@ export default function LoginPage() {
                 <button style={{ ...ghostBtn(), color: "var(--muted-foreground)", marginTop: 6 }} onClick={goBack}>
                   ← Back to phone
                 </button>
+              </>
+            )}
+
+            {/* ── STEP: set_pin ── */}
+            {step === "set_pin" && (
+              <>
+                <div style={{ marginBottom: 18 }}>
+                  <label style={labelStyle}>New PIN</label>
+                  <div style={wrapStyle(newPinFocused)}>
+                    <input
+                      ref={newPinInputRef}
+                      type="password" inputMode="numeric" maxLength={4}
+                      value={newPin}
+                      onChange={e => { setNewPin(e.target.value.replace(/\D/g, "")); setError(null); }}
+                      onFocus={() => setNewPinFocused(true)}
+                      onBlur={() => setNewPinFocused(false)}
+                      style={{ ...baseInputStyle, letterSpacing: "0.5em", fontFamily: "monospace" }}
+                      placeholder="••••"
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 8 }}>
+                  <label style={labelStyle}>Confirm PIN</label>
+                  <div style={wrapStyle(confirmPinFocused)}>
+                    <input
+                      type="password" inputMode="numeric" maxLength={4}
+                      value={confirmPin}
+                      onChange={e => { setConfirmPin(e.target.value.replace(/\D/g, "")); setError(null); }}
+                      onKeyDown={e => e.key === "Enter" && pinsMatch && handleSetPin()}
+                      onFocus={() => setConfirmPinFocused(true)}
+                      onBlur={() => setConfirmPinFocused(false)}
+                      style={{ ...baseInputStyle, letterSpacing: "0.5em", fontFamily: "monospace" }}
+                      placeholder="••••"
+                    />
+                  </div>
+                  {confirmPin.length === 4 && !pinsMatch && (
+                    <p style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>PINs don&apos;t match.</p>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 20 }}>
+                  <button onClick={handleSetPin} disabled={!pinsMatch || loading} style={primaryBtn(pinsMatch && !loading)}>
+                    {loading ? <Spinner /> : <Lock size={16} strokeWidth={2.2} />}
+                    {loading ? "Saving…" : "Save PIN"}
+                  </button>
+                </div>
+
+                {!cameFromForgotPin && (
+                  <button style={ghostBtn()} onClick={() => router.push("/dashboard")} disabled={loading}>
+                    Skip for now
+                  </button>
+                )}
               </>
             )}
           </div>

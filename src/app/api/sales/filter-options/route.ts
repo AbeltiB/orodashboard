@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const [departures, arrivals, employees] = await Promise.all([
+    const [departures, arrivals, employees, companies, associations, fleetCategories, levels] = await Promise.all([
       prisma.salesTrip.findMany({
         distinct: ["departureTerminalName"],
         select: { departureTerminalName: true },
@@ -31,6 +31,28 @@ export async function GET(request: NextRequest) {
         select: { employeeExternalId: true, employeeName: true },
         orderBy: { employeeName: "asc" },
       }),
+      prisma.salesTrip.findMany({
+        distinct: ["companyName"],
+        select: { companyName: true },
+        orderBy: { companyName: "asc" },
+      }),
+      prisma.salesTrip.findMany({
+        where: { vehicleAssociation: { not: null } },
+        distinct: ["vehicleAssociation"],
+        select: { vehicleAssociation: true },
+        orderBy: { vehicleAssociation: "asc" },
+      }),
+      prisma.salesTrip.findMany({
+        where: { vehicleFleetCategory: { not: null } },
+        distinct: ["vehicleFleetCategory"],
+        select: { vehicleFleetCategory: true },
+        orderBy: { vehicleFleetCategory: "asc" },
+      }),
+      prisma.salesTrip.findMany({
+        distinct: ["level"],
+        select: { level: true },
+        orderBy: { level: "asc" },
+      }),
     ]);
 
     return ok({
@@ -39,6 +61,10 @@ export async function GET(request: NextRequest) {
       employees: employees
         .filter((e) => e.employeeExternalId)
         .map((e) => ({ id: e.employeeExternalId as string, name: e.employeeName ?? "Unknown" })),
+      companies: companies.map((c) => c.companyName).filter(Boolean),
+      vehicleAssociations: associations.map((a) => a.vehicleAssociation).filter((v): v is string => !!v),
+      vehicleFleetCategories: fleetCategories.map((f) => f.vehicleFleetCategory).filter((v): v is string => !!v),
+      levels: levels.map((l) => l.level).filter(Boolean),
     });
   } catch (error) {
     return serverError(error);

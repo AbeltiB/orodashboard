@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/session";
+import { CASHIER_SESSION_COOKIE } from "@/lib/cashier-session";
 
 // Optimistic check only — presence of the cookie, nothing more. Proxy runs on
 // every request (including prefetches) and per Next's own auth guidance should
@@ -8,8 +9,23 @@ import { SESSION_COOKIE } from "@/lib/session";
 // happens in the DAL (src/lib/session.ts) from layouts, and in requireAuth()
 // (src/lib/api-auth.ts) from every API route handler — never trust proxy alone.
 export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith("/cashier")) {
+    const hasCashierSession = Boolean(request.cookies.get(CASHIER_SESSION_COOKIE));
+    const isCashierLogin = pathname === "/cashier/login";
+
+    if (!hasCashierSession && !isCashierLogin) {
+      return NextResponse.redirect(new URL("/cashier/login", request.url));
+    }
+    if (hasCashierSession && isCashierLogin) {
+      return NextResponse.redirect(new URL("/cashier", request.url));
+    }
+    return NextResponse.next();
+  }
+
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE));
-  const isLogin = request.nextUrl.pathname === "/login";
+  const isLogin = pathname === "/login";
 
   if (!hasSession && !isLogin) {
     return NextResponse.redirect(new URL("/login", request.url));
@@ -23,5 +39,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/login"],
+  matcher: ["/dashboard/:path*", "/login", "/cashier/:path*"],
 };

@@ -6,6 +6,7 @@ import { verifyOtpSchema } from "@/lib/schemas/auth";
 import { verifyPin } from "@/lib/pin";
 import { OTP_MAX_ATTEMPTS, OTP_LOCKOUT_MINUTES } from "@/lib/otp";
 import { createSession, SESSION_COOKIE } from "@/lib/session";
+import { createTrustedDevice, DEVICE_COOKIE } from "@/lib/device";
 
 export async function POST(request: NextRequest) {
   try {
@@ -79,18 +80,32 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const { token, expiresAt } = await createSession(admin.id, {
+    const meta = {
       userAgent: request.headers.get("user-agent"),
       ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
-    });
+    };
+    const { token, expiresAt } = await createSession(admin.id, meta);
+    // A full OTP sign-in is exactly what earns a device the right to use
+    // PIN sign-in next time — mark this browser trusted.
+    const device = await createTrustedDevice(admin.id, meta);
 
-    const res = NextResponse.json({ message: "Signed in." }, { status: 200 });
+    const res = NextResponse.json(
+      { message: "Signed in.", needsPinSetup: !admin.pinHash },
+      { status: 200 }
+    );
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       expires: expiresAt,
+    });
+    res.cookies.set(DEVICE_COOKIE, device.token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      expires: device.expiresAt,
     });
     return res;
   } catch (error) {
