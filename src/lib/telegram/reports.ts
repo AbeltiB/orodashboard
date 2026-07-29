@@ -51,6 +51,27 @@ function fmtETB(n: number): string {
   return new Intl.NumberFormat("en-ET", { maximumFractionDigits: 2 }).format(n) + " ETB";
 }
 
+// Telegram's sendMessage caps text at 4096 characters. A per-station or
+// per-mismatch list is normally nowhere near that, but nothing stops it from
+// growing (more stations added, an unusually bad day for deposits) — this
+// keeps whatever fits and says how many were left out instead of letting the
+// whole send fail once the list crosses the limit.
+const TELEGRAM_TEXT_LIMIT = 4096;
+
+function capLines(usedChars: number, itemLines: string[], overflowNote: (remaining: number) => string): string[] {
+  let used = usedChars;
+  const kept: string[] = [];
+  for (const line of itemLines) {
+    const cost = line.length + 1;
+    if (used + cost > TELEGRAM_TEXT_LIMIT - 200) break; // headroom for the overflow note itself
+    kept.push(line);
+    used += cost;
+  }
+  const remaining = itemLines.length - kept.length;
+  if (remaining > 0) kept.push(overflowNote(remaining));
+  return kept;
+}
+
 export async function buildDailySalesReport(date: Date): Promise<string> {
   const { from, to } = dayRange(date);
   const label = fmtDateLabel(date);
@@ -61,12 +82,14 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
       _sum: { totalServiceCharge: true, passengers: true },
       _count: { _all: true },
     }),
+    // Every departure station that had trips this day — no cap, so this
+    // always covers all of them (currently 9) and keeps covering all of
+    // them automatically as more stations get added later.
     prisma.salesTrip.groupBy({
       by: ["departureTerminalName"],
       where: { date: { gte: from, lt: to } },
       _sum: { totalServiceCharge: true },
       orderBy: { _sum: { totalServiceCharge: "desc" } },
-      take: 5,
     }),
   ]);
 
@@ -78,20 +101,23 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
     return `<b>Daily Sales Summary — ${label}</b>\n\nNo trips recorded for this day.`;
   }
 
-  const topLines = byTerminal
-    .map((t, i) => `${i + 1}. ${t.departureTerminalName} — ${fmtETB(toNumber(t._sum.totalServiceCharge ?? 0))}`)
-    .join("\n");
-
-  return [
+  const header = [
     `<b>Daily Sales Summary — ${label}</b>`,
     ``,
     `Trips: <b>${totalTrips.toLocaleString()}</b>`,
     `Passengers: <b>${totalPassengers.toLocaleString()}</b>`,
     `Total revenue: <b>${fmtETB(totalRevenue)}</b>`,
     ``,
-    `Top departure terminals:`,
-    topLines,
-  ].join("\n");
+    `By departure station (${byTerminal.length}):`,
+  ];
+  const stationLines = byTerminal.map((t, i) => `${i + 1}. ${t.departureTerminalName} — ${fmtETB(toNumber(t._sum.totalServiceCharge ?? 0))}`);
+  const shown = capLines(
+    header.join("\n").length,
+    stationLines,
+    (n) => `…and ${n} more station${n === 1 ? "" : "s"} — see the Sales page for full detail.`
+  );
+
+  return [...header, ...shown].join("\n");
 }
 
 export async function buildDailyDepositsReport(date: Date): Promise<string> {
@@ -101,10 +127,11 @@ export async function buildDailyDepositsReport(date: Date): Promise<string> {
   const [statusCounts, sums, mismatches] = await Promise.all([
     prisma.deposit.groupBy({ by: ["status"], where: { date: { gte: from, lt: to } }, _count: { _all: true } }),
     prisma.deposit.aggregate({ where: { date: { gte: from, lt: to } }, _sum: { expectedAmount: true, verifiedAmount: true } }),
+    // Every mismatched or failed deposit that day — no cap, per the same
+    // reasoning as the station list above.
     prisma.deposit.findMany({
       where: { date: { gte: from, lt: to }, status: { in: ["VERIFIED_MISMATCH", "FAILED"] } },
       include: { terminal: { select: { name: true } }, employee: { select: { firstName: true, lastName: true } } },
-      take: 10,
     }),
   ]);
 
@@ -121,12 +148,18 @@ export async function buildDailyDepositsReport(date: Date): Promise<string> {
   ];
 
   if (mismatches.length > 0) {
-    lines.push(``, `Needs attention:`);
-    for (const d of mismatches) {
+    const mismatchLines = mismatches.map((d) => {
       const who = d.employee ? `${d.employee.firstName} ${d.employee.lastName}` : "Unknown cashier";
       const diff = d.discrepancyAmount !== null ? ` (${toNumber(d.discrepancyAmount) > 0 ? "+" : ""}${fmtETB(toNumber(d.discrepancyAmount))})` : "";
-      lines.push(`• ${d.terminal?.name ?? "Unknown terminal"} — ${who}${diff}`);
-    }
+      return `• ${d.terminal?.name ?? "Unknown terminal"} — ${who}${diff}`;
+    });
+    lines.push(``, `Needs attention (${mismatches.length}):`);
+    const shown = capLines(
+      lines.join("\n").length,
+      mismatchLines,
+      (n) => `…and ${n} more — see the Deposits page for full list.`
+    );
+    lines.push(...shown);
   }
 
   return lines.join("\n");

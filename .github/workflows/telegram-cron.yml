@@ -1,0 +1,65 @@
+name: Telegram scheduler
+
+# Triggers the two Telegram background jobs on the deployed app every 5
+# minutes: firing any scheduled report whose day+time has arrived, and
+# checking for new /start replies so recipients get linked promptly. Both
+# routes are self-governing (dedupe by lastRunDate / getUpdates offset), so
+# this workflow's only job is to knock on the door on a schedule and surface
+# failures in the Actions tab — same shape as sales-sync.yml.
+#
+# Required repo configuration (Settings -> Secrets and variables -> Actions):
+#   Variables: TELEGRAM_RUN_SCHEDULED_URL -> e.g. https://orodashboard.onrender.com/api/telegram/run-scheduled
+#              TELEGRAM_POLL_UPDATES_URL  -> e.g. https://orodashboard.onrender.com/api/telegram/poll-updates
+#   Secrets:   TELEGRAM_CRON_TOKEN        -> must match TELEGRAM_CRON_TOKEN in the app's env
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  telegram:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run due schedules
+        run: |
+          if [ -z "${{ vars.TELEGRAM_RUN_SCHEDULED_URL }}" ] || [ -z "${{ secrets.TELEGRAM_CRON_TOKEN }}" ]; then
+            echo "TELEGRAM_RUN_SCHEDULED_URL (repo variable) and/or TELEGRAM_CRON_TOKEN (repo secret) are not set." >&2
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time 60 \
+            -X POST "${{ vars.TELEGRAM_RUN_SCHEDULED_URL }}" \
+            -H "x-sync-token: ${{ secrets.TELEGRAM_CRON_TOKEN }}")
+
+          echo "HTTP status: $http_status"
+          cat response.json
+          echo
+
+          if [ "$http_status" -ge 400 ]; then
+            echo "run-scheduled request failed." >&2
+            exit 1
+          fi
+
+      - name: Check for new Telegram replies
+        run: |
+          if [ -z "${{ vars.TELEGRAM_POLL_UPDATES_URL }}" ] || [ -z "${{ secrets.TELEGRAM_CRON_TOKEN }}" ]; then
+            echo "TELEGRAM_POLL_UPDATES_URL (repo variable) and/or TELEGRAM_CRON_TOKEN (repo secret) are not set." >&2
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time 60 \
+            -X POST "${{ vars.TELEGRAM_POLL_UPDATES_URL }}" \
+            -H "x-sync-token: ${{ secrets.TELEGRAM_CRON_TOKEN }}")
+
+          echo "HTTP status: $http_status"
+          cat response.json
+          echo
+
+          if [ "$http_status" -ge 400 ]; then
+            echo "poll-updates request failed." >&2
+            exit 1
+          fi

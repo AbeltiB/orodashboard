@@ -659,19 +659,25 @@ export default function SalesPage() {
           </div>
         )}
 
-        {/* Completeness banner — driven by the most recent sync's own count comparison */}
+        {/* Completeness banner — driven by the most recent sync's own count comparison.
+            Three states, not two: the source's own reported total isn't guaranteed to only
+            grow (confirmed live: it can dip after an outage on their end, e.g. gateway
+            errors), so "we have more than the source currently reports" is a real,
+            non-broken state — not just the mirror image of "behind." */}
         {latestLog && completenessGap !== null && !syncing && (
           <div style={{
             display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, marginBottom: 14,
-            background: completenessGap === 0 ? "#dcfce7" : "#fef3c7",
+            background: completenessGap > 0 ? "#fef3c7" : "#dcfce7",
           }}>
-            {completenessGap === 0
-              ? <Check size={15} color="#16a34a" />
-              : <AlertCircle size={15} color="#d97706" />}
-            <span style={{ fontSize: 13, color: completenessGap === 0 ? "#16a34a" : "#d97706", fontWeight: 500 }}>
+            {completenessGap > 0
+              ? <AlertCircle size={15} color="#d97706" />
+              : <Check size={15} color="#16a34a" />}
+            <span style={{ fontSize: 13, color: completenessGap > 0 ? "#d97706" : "#16a34a", fontWeight: 500 }}>
               {completenessGap === 0
                 ? `Fully in sync — ${latestLog.ourTotal?.toLocaleString()} trips match the source exactly.`
-                : `${completenessGap} trip${completenessGap === 1 ? "" : "s"} behind the source (${latestLog.ourTotal?.toLocaleString()} of ${latestLog.sourceTotal?.toLocaleString()}) — next sync will close the gap.`}
+                : completenessGap > 0
+                ? `${completenessGap} trip${completenessGap === 1 ? "" : "s"} behind the source (${latestLog.ourTotal?.toLocaleString()} of ${latestLog.sourceTotal?.toLocaleString()}) — next sync will close the gap.`
+                : `${Math.abs(completenessGap)} more trip${Math.abs(completenessGap) === 1 ? "" : "s"} on file than the source currently reports (${latestLog.ourTotal?.toLocaleString()} vs ${latestLog.sourceTotal?.toLocaleString()}) — likely a temporary dip on the source's end (or trips removed there); nothing missing on our side.`}
             </span>
           </div>
         )}
@@ -692,7 +698,9 @@ export default function SalesPage() {
                     <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{fmtDateTime(l.startedAt)}</span>
                     <span style={{ fontSize: 12, color: "var(--foreground)" }}>{l.rowsFetched} fetched · {l.rowsCreated} new · {l.rowsUpdated} already known · {l.passes} pass{l.passes === 1 ? "" : "es"} · {l.pagesFetched} page{l.pagesFetched === 1 ? "" : "s"}</span>
                     {l.sourceTotal !== null && l.ourTotal !== null && (
-                      <span style={{ fontSize: 12, color: l.sourceTotal === l.ourTotal ? "#16a34a" : "#d97706", fontWeight: 500 }}>
+                      // Amber only when genuinely behind (ourTotal < sourceTotal) — being
+                      // ahead isn't a problem, see the completeness banner above.
+                      <span style={{ fontSize: 12, color: l.ourTotal < l.sourceTotal ? "#d97706" : "#16a34a", fontWeight: 500 }}>
                         {l.ourTotal.toLocaleString()}/{l.sourceTotal.toLocaleString()} on file
                       </span>
                     )}

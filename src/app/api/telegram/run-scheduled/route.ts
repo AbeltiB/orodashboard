@@ -4,22 +4,34 @@ import { requirePermission } from "@/lib/api-auth";
 import { ok, unauthorized, serverError } from "@/lib/api-utils";
 import { runDueSchedules } from "@/lib/telegram/scheduler";
 
+// This GET does real work (fires due reports) — never let it be treated as a
+// cacheable/static route.
+export const dynamic = "force-dynamic";
+
 /**
- * POST /api/telegram/run-scheduled
  * Fires every active schedule whose configured local time has passed for
- * today (Addis time) and hasn't already run today. Two ways in, mirroring
+ * today (Addis time) and hasn't already run today. Three ways in, mirroring
  * /api/sales/sync and /api/deposits/poll-pending:
- *  - `x-sync-token` header matching TELEGRAM_CRON_TOKEN -> external cron,
- *    call every few minutes (safe at any cadence — lastRunDate dedupes).
+ *  - `x-sync-token` header matching TELEGRAM_CRON_TOKEN -> external cron
+ *    that supports custom headers (e.g. cron-job.org), POST.
+ *  - `?token=` query param matching TELEGRAM_CRON_TOKEN -> plain GET, for
+ *    free "ping this URL" services that can't send custom headers or POST
+ *    (e.g. UptimeRobot's free tier). Less conventional than a header, but
+ *    this endpoint only ever triggers a low-privilege, idempotent check —
+ *    never returns or accepts anything sensitive — so a token in the URL is
+ *    an acceptable tradeoff for that compatibility.
  *  - An authenticated admin session with telegram edit access -> manual
- *    "Run due schedules now" button.
+ *    "Run due schedules now" button, POST.
+ * Call every 1-5 minutes; safe at any cadence since lastRunDate dedupes.
  */
-export async function POST(request: NextRequest) {
+async function handle(request: NextRequest) {
   const tokenHeader = request.headers.get("x-sync-token");
+  const tokenQuery = request.nextUrl.searchParams.get("token");
+  const suppliedToken = tokenHeader ?? tokenQuery;
   const expectedToken = process.env.TELEGRAM_CRON_TOKEN;
 
-  if (tokenHeader) {
-    if (!expectedToken || tokenHeader !== expectedToken) {
+  if (suppliedToken) {
+    if (!expectedToken || suppliedToken !== expectedToken) {
       return unauthorized("Invalid sync token.");
     }
   } else {
@@ -34,3 +46,6 @@ export async function POST(request: NextRequest) {
     return serverError(error);
   }
 }
+
+export const POST = handle;
+export const GET = handle;
