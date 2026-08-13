@@ -117,6 +117,7 @@ model Station {
   posMachineHistory  PosMachineHistory[]
   posSessions        PosSession[]
   shiftAssignments   ShiftAssignment[]
+  cashierAssignments CashierStationAssignment[]
 
   @@index([isDeleted])
   @@index([region])
@@ -254,6 +255,7 @@ model Employee {
   shiftAssignments    ShiftAssignment[]
   cashierSessions     CashierSession[]
   terminalAssignments CashierTerminalAssignment[]
+  stationAssignments  CashierStationAssignment[]
   deposits            Deposit[]
 
   @@index([stationId, isDeleted])
@@ -647,6 +649,30 @@ model CashierTerminalAssignment {
   @@unique([employeeId, terminalId])
   @@index([terminalId, isActive])
   @@map("cashier_terminal_assignments")
+}
+
+// Which station(s) a cashier covers for the day-to-day sales reconciliation
+// portal (src/app/cashier/sales) — deliberately separate from
+// CashierTerminalAssignment above (that one scopes the verify.et deposit
+// flow to specific terminals). A station assignment is broader: it covers
+// every route/terminal departing from that station, so a cashier doesn't
+// need re-assigning every time a new route opens at their station.
+model CashierStationAssignment {
+  id          String    @id @default(cuid())
+
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  stationId   String
+  station     Station   @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  isActive    Boolean   @default(true)
+  assignedAt  DateTime  @default(now())
+  assignedBy  String?   // AdminUser id
+
+  @@unique([employeeId, stationId])
+  @@index([stationId, isActive])
+  @@map("cashier_station_assignments")
 }
 
 enum DepositStatus {

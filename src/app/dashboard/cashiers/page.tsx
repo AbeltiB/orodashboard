@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 
 type Assignment = { id: string; isActive: boolean; assignedAt: string; terminal: { id: string; name: string } };
+type StationAssignment = { id: string; isActive: boolean; assignedAt: string; station: { id: string; name: string; code: string } };
 type CashierRow = {
   id: string;
   code: string;
@@ -16,9 +17,11 @@ type CashierRow = {
   hasPinSet: boolean;
   pinLockedUntil: string | null;
   assignments: Assignment[];
+  stationAssignments: StationAssignment[];
 };
 type EmployeeOption = { id: string; fullName: string; phone: string; role: string };
 type TerminalOption = { id: string; name: string };
+type StationOption = { id: string; name: string; code: string };
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
@@ -56,7 +59,67 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-function AssignModal({ employees, terminals, onSaved, onClose }: {
+function StationAssignModal({ employees, stations, onSaved, onClose }: {
+  employees: EmployeeOption[]; stations: StationOption[]; onSaved: () => void; onClose: () => void;
+}) {
+  const [employeeId, setEmployeeId] = useState("");
+  const [stationId, setStationId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (!employeeId || !stationId || saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch("/api/cashiers/station-assignments", { method: "POST", body: JSON.stringify({ employeeId, stationId }) });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to assign.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Assign a cashier to a station" onClose={onClose}>
+      <p style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 16, lineHeight: 1.55 }}>
+        Pick any existing employee — a new person can be added on the Employees page first, then assigned here.
+        They&apos;ll see every route departing from this station in their Sales portal.
+      </p>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Employee</label>
+        <select style={{ ...iCss, cursor: "pointer" }} value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+          <option value="">Select employee…</option>
+          {employees.map(e => <option key={e.id} value={e.id}>{e.fullName} — {e.phone}</option>)}
+        </select>
+      </div>
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Station</label>
+        <select style={{ ...iCss, cursor: "pointer" }} value={stationId} onChange={e => setStationId(e.target.value)}>
+          <option value="">Select station…</option>
+          {stations.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+        </select>
+      </div>
+
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "var(--danger-bg)", borderRadius: 8, marginBottom: 14 }}>
+          <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "var(--danger)" }}>{error}</span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button onClick={onClose} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+        <button onClick={save} disabled={!employeeId || !stationId || saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: employeeId && stationId && !saving ? 1 : 0.5, display: "flex", alignItems: "center", gap: 7 }}>
+          {saving && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
+          Assign
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function TerminalAssignModal({ employees, terminals, onSaved, onClose }: {
   employees: EmployeeOption[]; terminals: TerminalOption[]; onSaved: () => void; onClose: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState("");
@@ -78,9 +141,9 @@ function AssignModal({ employees, terminals, onSaved, onClose }: {
   }
 
   return (
-    <Modal title="Assign a cashier" onClose={onClose}>
+    <Modal title="Assign a cashier to a terminal (deposits)" onClose={onClose}>
       <p style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 16, lineHeight: 1.55 }}>
-        Pick any existing employee — a new person can be added on the Employees page first, then assigned here.
+        For the verify.et deposit-reconciliation flow, currently on hold. Pick any existing employee.
       </p>
       <div style={{ marginBottom: 14 }}>
         <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Employee</label>
@@ -177,8 +240,10 @@ export default function CashiersPage() {
   const [cashiers, setCashiers] = useState<CashierRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [terminals, setTerminals] = useState<TerminalOption[]>([]);
+  const [stations, setStations] = useState<StationOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAssign, setShowAssign] = useState(false);
+  const [showStationAssign, setShowStationAssign] = useState(false);
+  const [showTerminalAssign, setShowTerminalAssign] = useState(false);
   const [pinTarget, setPinTarget] = useState<CashierRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -191,12 +256,14 @@ export default function CashiersPage() {
 
   const loadOptions = useCallback(async () => {
     try {
-      const [empRes, termRes] = await Promise.all([
+      const [empRes, termRes, stationRes] = await Promise.all([
         apiFetch<{ data: { id: string; fullName: string; phone: string; role: string }[] }>("/api/employees?limit=1000"),
         apiFetch<{ data: TerminalOption[] }>("/api/terminals?isDeparture=true&limit=1000"),
+        apiFetch<{ data: StationOption[] }>("/api/stations?limit=1000"),
       ]);
       setEmployees(empRes.data.map(e => ({ id: e.id, fullName: e.fullName, phone: e.phone, role: e.role })));
       setTerminals(termRes.data);
+      setStations(stationRes.data.map((s: StationOption) => ({ id: s.id, name: s.name, code: s.code })));
     } catch (e) { console.error(e); }
   }, []);
 
@@ -215,9 +282,19 @@ export default function CashiersPage() {
     }
   }
 
+  async function removeStationAssignment(assignmentId: string) {
+    if (!confirm("Remove this station assignment?")) return;
+    try {
+      await apiFetch(`/api/cashiers/station-assignments/${assignmentId}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Failed to remove assignment.");
+    }
+  }
+
   const stats = useMemo(() => ({
     total: cashiers.length,
-    terminals: new Set(cashiers.flatMap(c => c.assignments.filter(a => a.isActive).map(a => a.terminal.id))).size,
+    stations: new Set(cashiers.flatMap(c => c.stationAssignments.filter(a => a.isActive).map(a => a.station.id))).size,
     noPin: cashiers.filter(c => !c.hasPinSet).length,
     locked: cashiers.filter(c => c.pinLockedUntil && new Date(c.pinLockedUntil) > new Date()).length,
   }), [cashiers]);
@@ -226,7 +303,8 @@ export default function CashiersPage() {
     <>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } } * { box-sizing: border-box; }`}</style>
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
-      {showAssign && <AssignModal employees={employees} terminals={terminals} onSaved={() => { setShowAssign(false); load(); setToast("Cashier assigned."); }} onClose={() => setShowAssign(false)} />}
+      {showStationAssign && <StationAssignModal employees={employees} stations={stations} onSaved={() => { setShowStationAssign(false); load(); setToast("Cashier assigned to station."); }} onClose={() => setShowStationAssign(false)} />}
+      {showTerminalAssign && <TerminalAssignModal employees={employees} terminals={terminals} onSaved={() => { setShowTerminalAssign(false); load(); setToast("Cashier assigned to terminal."); }} onClose={() => setShowTerminalAssign(false)} />}
       {pinTarget && <PinModal cashier={pinTarget} onSaved={(msg) => { setPinTarget(null); load(); setToast(msg); }} onClose={() => setPinTarget(null)} />}
 
       <div className="page-pad" style={{ minHeight: "100vh", background: "var(--background)", padding: "24px 28px" }}>
@@ -236,18 +314,23 @@ export default function CashiersPage() {
               <Wallet size={22} /> Cashiers
             </h1>
             <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "3px 0 0" }}>
-              Who deposits each terminal&apos;s daily cash, and their PIN sign-in status.
+              Station assignments drive the Sales reconciliation portal. Terminal assignments (deposit verification) are on hold for now.
             </p>
           </div>
-          <button onClick={() => setShowAssign(true)} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
-            <Plus size={16} strokeWidth={2.5} /> Assign cashier
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowTerminalAssign(true)} style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--foreground)", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+              <Plus size={14} strokeWidth={2.5} /> Assign terminal (deposits)
+            </button>
+            <button onClick={() => setShowStationAssign(true)} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+              <Plus size={16} strokeWidth={2.5} /> Assign station
+            </button>
+          </div>
         </div>
 
         <div className="grid-4" style={{ gap: 12, marginBottom: 18 }}>
           {[
             { label: "Cashiers", value: stats.total, icon: <Users size={16} />, color: "#2563eb", bg: "#dbeafe" },
-            { label: "Terminals covered", value: stats.terminals, icon: <Building2 size={16} />, color: "#16a34a", bg: "#dcfce7" },
+            { label: "Stations covered", value: stats.stations, icon: <Building2 size={16} />, color: "#16a34a", bg: "#dcfce7" },
             { label: "PIN not set", value: stats.noPin, icon: <ShieldAlert size={16} />, color: "#d97706", bg: "#fef3c7" },
             { label: "Currently locked", value: stats.locked, icon: <ShieldCheck size={16} />, color: "#dc2626", bg: "#fee2e2" },
           ].map(c => (
@@ -274,7 +357,7 @@ export default function CashiersPage() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
-                    {["#", "Name", "Phone", "Terminals", "PIN status", ""].map(h => (
+                    {["#", "Name", "Phone", "Stations (sales)", "Terminals (deposits)", "PIN status", ""].map(h => (
                       <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -289,6 +372,19 @@ export default function CashiersPage() {
                         <td style={{ padding: "10px 14px", color: "var(--muted-foreground)", fontFamily: "monospace" }}>{c.phone}</td>
                         <td style={{ padding: "10px 14px" }}>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {c.stationAssignments.filter(a => a.isActive).map(a => (
+                              <span key={a.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, background: "#dbeafe", color: "#1d4ed8", padding: "3px 8px 3px 10px", borderRadius: 999 }}>
+                                {a.station.name}
+                                <button onClick={() => removeStationAssignment(a.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#1d4ed8", display: "flex", padding: 0 }}>
+                                  <Trash2 size={11} />
+                                </button>
+                              </span>
+                            ))}
+                            {c.stationAssignments.filter(a => a.isActive).length === 0 && <span style={{ color: "var(--muted-foreground)", fontSize: 12 }}>None</span>}
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                             {c.assignments.filter(a => a.isActive).map(a => (
                               <span key={a.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600, background: "#dcfce7", color: "#16a34a", padding: "3px 8px 3px 10px", borderRadius: 999 }}>
                                 {a.terminal.name}
@@ -297,7 +393,7 @@ export default function CashiersPage() {
                                 </button>
                               </span>
                             ))}
-                            {c.assignments.filter(a => a.isActive).length === 0 && <span style={{ color: "var(--muted-foreground)", fontSize: 12 }}>None active</span>}
+                            {c.assignments.filter(a => a.isActive).length === 0 && <span style={{ color: "var(--muted-foreground)", fontSize: 12 }}>None</span>}
                           </div>
                         </td>
                         <td style={{ padding: "10px 14px" }}>

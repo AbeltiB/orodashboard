@@ -19,7 +19,9 @@ export function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/cashier/login", request.url));
     }
     if (hasCashierSession && isCashierLogin) {
-      return NextResponse.redirect(new URL("/cashier", request.url));
+      // Sales reconciliation is the primary daily-use feature; deposits
+      // (verify.et) is on hold for now — see /cashier/deposits.
+      return NextResponse.redirect(new URL("/cashier/sales", request.url));
     }
     return NextResponse.next();
   }

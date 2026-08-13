@@ -1,9 +1,10 @@
-// src/app/api/sales/by-ticketer/[employeeId]/breakdown/route.ts
+// src/app/api/cashier/sales/by-ticketer/[employeeId]/breakdown/route.ts
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
-import { requirePermission } from "@/lib/api-auth";
+import { requireCashierAuth } from "@/lib/cashier-auth";
 import { badRequest, ok, serverError } from "@/lib/api-utils";
+import { getCashierStationMatchNames } from "@/lib/cashier-sales-scope";
 
 type Context = { params: Promise<{ employeeId: string }> };
 
@@ -19,40 +20,27 @@ type RawRow = {
 };
 
 /**
- * GET /api/sales/by-ticketer/:employeeId/breakdown
- * One ticketer's trips grouped by calendar day x route (both at once, in a
- * single query) — small enough per ticketer to send whole and let the
- * client re-slice it into "by route" and "by date" views, and expand any
- * date into the routes worked that day, without extra round-trips.
- * Accepts the same filters as /api/sales/trips.
- *
- * The WHERE clause is intentionally static SQL text with nullable bound
- * parameters (`$n IS NULL OR ...`) rather than conditionally-composed
- * Prisma.sql fragments joined together — nesting Prisma.Sql fragments
- * inside another $queryRaw template isn't reliably flattened by this
- * Prisma version's driver-adapter path (it got serialized to a JSON string
- * and bound as a single parameter instead of spliced as raw SQL, which
- * Postgres then rejected). Plain scalar parameters, including null,
- * bind correctly, so that's what this uses throughout.
+ * GET /api/cashier/sales/by-ticketer/:employeeId/breakdown
+ * One ticketer's trips grouped by day x route, scoped to the cashier's
+ * assigned station(s) — powers the weekly/monthly reconciliation drill-down.
+ * See the admin equivalent (src/app/api/sales/by-ticketer/[employeeId]/breakdown)
+ * for the rationale on plain-parameter raw SQL over composed Sql fragments.
  */
 export async function GET(request: NextRequest, context: Context) {
-  const auth = await requirePermission(request, "sales", "view");
+  const auth = await requireCashierAuth(request);
   if ("error" in auth) return auth.error;
 
   try {
     const { employeeId } = await context.params;
     if (!employeeId) return badRequest("employeeId is required.");
 
+    const matchNames = await getCashierStationMatchNames(auth.session.employeeId);
+    if (matchNames.length === 0) return ok({ data: [] });
+
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom")?.trim() || null;
     const dateTo = searchParams.get("dateTo")?.trim() || null;
-    const departureTerminal = searchParams.get("departureTerminal")?.trim() || null;
     const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim() || null;
-    const plateNo = searchParams.get("plateNo")?.trim();
-    const search = searchParams.get("search")?.trim();
-
-    const plateLike = plateNo ? `%${plateNo}%` : null;
-    const searchLike = search ? `%${search}%` : null;
 
     const rows = await prisma.$queryRaw<RawRow[]>`
       SELECT
@@ -66,18 +54,10 @@ export async function GET(request: NextRequest, context: Context) {
         SUM("totalServiceCharge") as "totalServiceCharge"
       FROM "sales_trips"
       WHERE "employeeExternalId" = ${employeeId}
+        AND "departureTerminalName" IN (${Prisma.join(matchNames)})
         AND (${dateFrom}::timestamp IS NULL OR "date" >= ${dateFrom}::timestamp)
         AND (${dateTo}::timestamp IS NULL OR "date" < ${dateTo}::timestamp + interval '1 day')
-        AND (${departureTerminal}::text IS NULL OR "departureTerminalName" = ${departureTerminal}::text)
         AND (${arrivalTerminal}::text IS NULL OR "arrivalTerminalName" = ${arrivalTerminal}::text)
-        AND (${plateLike}::text IS NULL OR "vehiclePlateNo" ILIKE ${plateLike}::text)
-        AND (
-          ${searchLike}::text IS NULL
-          OR "employeeName" ILIKE ${searchLike}::text
-          OR "departureTerminalName" ILIKE ${searchLike}::text
-          OR "arrivalTerminalName" ILIKE ${searchLike}::text
-          OR "vehiclePlateNo" ILIKE ${searchLike}::text
-        )
       GROUP BY day, "departureTerminalName", "arrivalTerminalName"
       ORDER BY day DESC, "arrivalTerminalName" ASC
     `;

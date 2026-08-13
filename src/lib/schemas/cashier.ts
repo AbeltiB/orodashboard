@@ -24,7 +24,13 @@ export const assignCashierTerminalSchema = z.object({
   terminalId: z.string().cuid(),
 });
 
+export const assignCashierStationSchema = z.object({
+  employeeId: z.string().cuid(),
+  stationId: z.string().cuid(),
+});
+
 export type CashierLoginInput = z.infer<typeof cashierLoginSchema>;
 export type CashierChangePinInput = z.infer<typeof cashierChangePinSchema>;
 export type CashierResetPinInput = z.infer<typeof cashierResetPinSchema>;
 export type AssignCashierTerminalInput = z.infer<typeof assignCashierTerminalSchema>;
+export type AssignCashierStationInput = z.infer<typeof assignCashierStationSchema>;

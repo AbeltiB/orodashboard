@@ -6,9 +6,10 @@ import { ok, serverError } from "@/lib/api-utils";
 
 /**
  * GET /api/cashiers
- * Every employee with at least one terminal assignment (active or not) —
- * the admin "Cashiers" page's roster. Employees with zero assignments don't
- * show up here; use GET /api/employees to find someone to assign.
+ * Every employee with at least one terminal assignment (deposits) or station
+ * assignment (sales reconciliation) — the admin "Cashiers" page's roster.
+ * Employees with neither don't show up here; use GET /api/employees to find
+ * someone to assign.
  */
 export async function GET(request: NextRequest) {
   const auth = await requirePermission(request, "cashiers", "view");
@@ -16,7 +17,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const employees = await prisma.employee.findMany({
-      where: { terminalAssignments: { some: {} }, isDeleted: false },
+      where: {
+        isDeleted: false,
+        OR: [{ terminalAssignments: { some: {} } }, { stationAssignments: { some: {} } }],
+      },
       select: {
         id: true,
         code: true,
@@ -34,6 +38,15 @@ export async function GET(request: NextRequest) {
             isActive: true,
             assignedAt: true,
             terminal: { select: { id: true, name: true } },
+          },
+        },
+        stationAssignments: {
+          orderBy: { assignedAt: "desc" },
+          select: {
+            id: true,
+            isActive: true,
+            assignedAt: true,
+            station: { select: { id: true, name: true, code: true } },
           },
         },
       },
@@ -54,6 +67,12 @@ export async function GET(request: NextRequest) {
           isActive: a.isActive,
           assignedAt: a.assignedAt,
           terminal: a.terminal,
+        })),
+        stationAssignments: e.stationAssignments.map((a) => ({
+          id: a.id,
+          isActive: a.isActive,
+          assignedAt: a.assignedAt,
+          station: a.station,
         })),
       })),
     });

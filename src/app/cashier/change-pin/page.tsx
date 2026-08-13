@@ -34,7 +34,7 @@ export default function CashierChangePinPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json?.message ?? "Failed to update PIN.");
       setSuccess(true);
-      setTimeout(() => router.push("/cashier"), 1200);
+      setTimeout(() => router.push("/cashier/sales"), 1200);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update PIN.");
     } finally {
@@ -48,7 +48,7 @@ export default function CashierChangePinPage() {
       <main style={{ minHeight: "100vh", background: "var(--background)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
         <div style={{ width: "100%", maxWidth: 380 }}>
           <button
-            onClick={() => router.push("/cashier")}
+            onClick={() => router.push("/cashier/sales")}
             style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer", marginBottom: 16, padding: 0 }}
           >
             <ArrowLeft size={14} /> Back
