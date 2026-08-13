@@ -42,6 +42,15 @@ type BreakdownRow = {
   totalCollected: number;
 };
 
+type RouteDayRow = {
+  date: string;
+  trips: number;
+  passengers: number;
+  tariff: number;
+  totalServiceCharge: number;
+  totalCollected: number;
+};
+
 type FilterOptions = { stations: { id: string; name: string }[]; employees: { id: string; name: string }[]; arrivalTerminals: string[] };
 type SelectedEmployee = { id: string; name: string };
 
@@ -108,6 +117,10 @@ export default function CashierSalesPage() {
   const [selected, setSelected] = useState<SelectedEmployee | null>(null);
   const [breakdown, setBreakdown] = useState<BreakdownRow[]>([]);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
+
+  const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
+  const [routeDayBreakdown, setRouteDayBreakdown] = useState<RouteDayRow[]>([]);
+  const [routeDayBreakdownLoading, setRouteDayBreakdownLoading] = useState(false);
 
   const [syncing, setSyncing] = useState(false);
 
@@ -193,16 +206,44 @@ export default function CashierSalesPage() {
     }
   }, [stationId, dateFrom, dateTo, route]);
 
+  const loadRouteDayBreakdown = useCallback(async (routeName: string) => {
+    if (!stationId) return;
+    setRouteDayBreakdownLoading(true);
+    try {
+      const params = new URLSearchParams({ stationId });
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      const res = await apiFetch<{ data: RouteDayRow[] }>(`/api/cashier/sales/by-route/${encodeURIComponent(routeName)}/breakdown?${params.toString()}`);
+      setRouteDayBreakdown(res.data);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Failed to load route breakdown.");
+    } finally {
+      setRouteDayBreakdownLoading(false);
+    }
+  }, [stationId, dateFrom, dateTo]);
+
   useEffect(() => { loadFilterOptions(); }, [loadFilterOptions]);
   useEffect(() => { if (viewMode === "ticketer" && !selected) loadByTicketer(); }, [viewMode, selected, loadByTicketer]);
-  useEffect(() => { if (viewMode === "route" && !selected) loadByRoute(); }, [viewMode, selected, loadByRoute]);
+  useEffect(() => { if (viewMode === "route" && !selected && !selectedRoute) loadByRoute(); }, [viewMode, selected, selectedRoute, loadByRoute]);
   useEffect(() => { if (selected) loadBreakdown(selected.id); }, [selected, loadBreakdown]);
+  useEffect(() => { if (selectedRoute) loadRouteDayBreakdown(selectedRoute); }, [selectedRoute, loadRouteDayBreakdown]);
 
   function switchStation(id: string) {
     setStationId(id);
     setSelected(null);
+    setSelectedRoute(null);
     setRoute("");
     setTicketerSearch("");
+  }
+
+  function selectTicketer(employee: SelectedEmployee) {
+    setSelectedRoute(null);
+    setSelected(employee);
+  }
+
+  function selectRoute(routeName: string) {
+    setSelected(null);
+    setSelectedRoute(routeName);
   }
 
   async function handleSync() {
@@ -212,6 +253,7 @@ export default function CashierSalesPage() {
       if (res.status === "SKIPPED") setToast("Already up to date.");
       else setToast(`Synced: ${res.rowsCreated} new trip${res.rowsCreated === 1 ? "" : "s"}.`);
       if (selected) await loadBreakdown(selected.id);
+      else if (selectedRoute) await loadRouteDayBreakdown(selectedRoute);
       else if (viewMode === "ticketer") await loadByTicketer();
       else await loadByRoute();
     } catch (e) {
@@ -233,6 +275,19 @@ export default function CashierSalesPage() {
       { trips: 0, passengers: 0, tariff: 0, totalServiceCharge: 0, totalCollected: 0 }
     );
   }, [breakdown]);
+
+  const routeDayTotals = useMemo(() => {
+    return routeDayBreakdown.reduce(
+      (acc, r) => ({
+        trips: acc.trips + r.trips,
+        passengers: acc.passengers + r.passengers,
+        tariff: acc.tariff + r.tariff,
+        totalServiceCharge: acc.totalServiceCharge + r.totalServiceCharge,
+        totalCollected: acc.totalCollected + r.totalCollected,
+      }),
+      { trips: 0, passengers: 0, tariff: 0, totalServiceCharge: 0, totalCollected: 0 }
+    );
+  }, [routeDayBreakdown]);
 
   const byDate = useMemo(() => {
     const map = new Map<string, { date: string; trips: number; passengers: number; tariff: number; totalServiceCharge: number; totalCollected: number }>();
@@ -336,7 +391,7 @@ export default function CashierSalesPage() {
               {searchFocused && matchingTicketers.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 8px 24px rgb(0 0 0 / 0.12)", zIndex: 20, overflow: "hidden" }}>
                   {matchingTicketers.map(e => (
-                    <button key={e.id} onMouseDown={() => { setSelected({ id: e.id, name: e.name }); setTicketerSearch(""); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 12px", border: "none", background: "none", cursor: "pointer", textAlign: "left", fontSize: 13.5, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
+                    <button key={e.id} onMouseDown={() => { selectTicketer({ id: e.id, name: e.name }); setTicketerSearch(""); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 12px", border: "none", background: "none", cursor: "pointer", textAlign: "left", fontSize: 13.5, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
                       <User size={13} color="var(--muted-foreground)" /> {e.name}
                     </button>
                   ))}
@@ -477,6 +532,65 @@ export default function CashierSalesPage() {
                 </>
               )}
             </div>
+          ) : selectedRoute ? (
+            /* ── Drill-down: one route, day by day ── */
+            <div>
+              <button onClick={() => setSelectedRoute(null)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer", marginBottom: 14, padding: 0 }}>
+                <ChevronLeft size={15} /> Back
+              </button>
+
+              <div style={{ ...cardStyle, marginBottom: 14, background: "color-mix(in srgb, var(--primary) 7%, var(--surface))", border: "1px solid color-mix(in srgb, var(--primary) 25%, transparent)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <RouteIcon size={15} color="var(--primary)" />
+                  <span style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)", wordBreak: "break-word" }}>{selectedRoute}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>
+                  Total to collect — {rangeLabel.toLowerCase()}
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: "var(--primary)", marginBottom: 8, wordBreak: "break-word" }}>{fmtETB(routeDayTotals.totalCollected)}</div>
+                <div style={{ display: "flex", gap: 16, rowGap: 4, flexWrap: "wrap", fontSize: 12.5, color: "var(--foreground)" }}>
+                  <span>Sales: <strong>{fmtETB(routeDayTotals.tariff)}</strong></span>
+                  <span>Service charge: <strong>{fmtETB(routeDayTotals.totalServiceCharge)}</strong></span>
+                </div>
+                <div style={{ display: "flex", gap: 14, rowGap: 4, flexWrap: "wrap", marginTop: 8, fontSize: 12.5, color: "var(--muted-foreground)" }}>
+                  <span>{routeDayTotals.trips.toLocaleString()} trips</span>
+                  <span>{routeDayTotals.passengers.toLocaleString()} passengers</span>
+                </div>
+              </div>
+
+              {routeDayBreakdownLoading ? (
+                <div style={{ textAlign: "center", padding: 24, color: "var(--muted-foreground)" }}>
+                  <Loader2 size={17} style={{ animation: "spin 1s linear infinite" }} />
+                </div>
+              ) : routeDayBreakdown.length === 0 ? (
+                <div style={{ ...cardStyle, textAlign: "center", color: "var(--muted-foreground)" }}>
+                  <p style={{ fontSize: 13 }}>No trips on this route in this period at this station.</p>
+                  {rangeMode !== "alltime" && (
+                    <button onClick={() => setRangeMode("alltime")} style={{ marginTop: 10, fontSize: 12.5, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                      Check all time instead
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: 8 }}>By day</p>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {routeDayBreakdown.map(d => (
+                      <div key={d.date} style={{ ...cardStyle, padding: "12px 14px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", rowGap: 4, gap: 8 }}>
+                          <span style={{ fontSize: 13, color: "var(--foreground)" }}>{fmtDayLabel(d.date)}</span>
+                          <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{d.trips} trips</span>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--primary)" }}>{fmtETB(d.totalCollected)}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>
+                          Sales {fmtETB(d.tariff)} · Service charge <strong style={{ color: "var(--foreground)" }}>{fmtETB(d.totalServiceCharge)}</strong>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           ) : (
             /* ── Station overview: by ticketer or by route ── */
             <div>
@@ -493,10 +607,14 @@ export default function CashierSalesPage() {
                 ))}
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 18 }}>
                 <div style={cardStyle}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}><TrendingUp size={13} /> {rangeLabel} total</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--primary)" }}>{fmtETB(depositSummary.totalCollected)}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--primary)", wordBreak: "break-word" }}>{fmtETB(depositSummary.totalCollected)}</div>
+                </div>
+                <div style={cardStyle}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}><Coins size={13} /> Service charge</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--success)", wordBreak: "break-word" }}>{fmtETB(depositSummary.totalServiceCharge)}</div>
                 </div>
                 <div style={cardStyle}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}>
@@ -520,7 +638,7 @@ export default function CashierSalesPage() {
                 ) : (
                   <div style={{ display: "grid", gap: 10 }}>
                     {byTicketer.map(r => (
-                      <button key={r.employeeId} onClick={() => setSelected({ id: r.employeeId, name: r.employeeName })} style={{ ...cardStyle, textAlign: "left", cursor: "pointer", width: "100%" }}>
+                      <button key={r.employeeId} onClick={() => selectTicketer({ id: r.employeeId, name: r.employeeName })} style={{ ...cardStyle, textAlign: "left", cursor: "pointer", width: "100%" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", rowGap: 4, gap: 8 }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 6, wordBreak: "break-word" }}>
@@ -546,7 +664,7 @@ export default function CashierSalesPage() {
               ) : (
                 <div style={{ display: "grid", gap: 10 }}>
                   {byRoute.map(r => (
-                    <div key={r.route} style={cardStyle}>
+                    <button key={r.route} onClick={() => selectRoute(r.route)} style={{ ...cardStyle, textAlign: "left", cursor: "pointer", width: "100%" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", rowGap: 4, gap: 8 }}>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 6, wordBreak: "break-word" }}>
@@ -560,7 +678,7 @@ export default function CashierSalesPage() {
                         <span>Sales: <strong style={{ color: "var(--foreground)" }}>{fmtETB(r.tariff)}</strong></span>
                         <span>Service charge: <strong style={{ color: "var(--foreground)" }}>{fmtETB(r.totalServiceCharge)}</strong></span>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
