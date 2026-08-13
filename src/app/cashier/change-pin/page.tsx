@@ -6,7 +6,7 @@ import { ArrowLeft, KeyRound, Loader2 } from "lucide-react";
 
 const inputStyle: React.CSSProperties = {
   width: "100%", height: 46, padding: "0 14px", borderRadius: 10,
-  border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 15,
+  border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 16,
   color: "var(--foreground)", outline: "none", letterSpacing: "0.5em", fontFamily: "monospace",
 };
 

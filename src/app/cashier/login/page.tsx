@@ -48,9 +48,10 @@ const baseInputStyle: React.CSSProperties = {
   outline: "none",
   border: "none",
   background: "transparent",
-  fontSize: "15px",
+  fontSize: "16px",
   color: "var(--foreground)",
   width: "100%",
+  minWidth: 0,
 };
 
 function wrapStyle(focused: boolean): React.CSSProperties {

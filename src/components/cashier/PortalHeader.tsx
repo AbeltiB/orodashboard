@@ -21,14 +21,14 @@ export default function PortalHeader({ me }: { me: Me }) {
 
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--foreground)" }}>{me ? me.fullName : "…"}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me ? me.fullName : "…"}</div>
           <div style={{ fontSize: 12.5, color: "var(--muted-foreground)" }}>{me?.phone}</div>
         </div>
         <button
           onClick={handleLogout}
-          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: "var(--muted-foreground)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: "8px 12px", cursor: "pointer" }}
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: "var(--muted-foreground)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: "8px 12px", cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}
         >
           <LogOut size={14} /> Sign out
         </button>

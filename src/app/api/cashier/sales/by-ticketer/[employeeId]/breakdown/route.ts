@@ -3,8 +3,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { requireCashierAuth } from "@/lib/cashier-auth";
-import { badRequest, ok, serverError } from "@/lib/api-utils";
-import { getCashierStationMatchNames } from "@/lib/cashier-sales-scope";
+import { badRequest, forbidden, ok, serverError } from "@/lib/api-utils";
+import { assertCashierOwnsStation, getCashierStationMatchNames } from "@/lib/cashier-sales-scope";
 
 type Context = { params: Promise<{ employeeId: string }> };
 
@@ -21,10 +21,10 @@ type RawRow = {
 
 /**
  * GET /api/cashier/sales/by-ticketer/:employeeId/breakdown
- * One ticketer's trips grouped by day x route, scoped to the cashier's
- * assigned station(s) — powers the weekly/monthly reconciliation drill-down.
- * See the admin equivalent (src/app/api/sales/by-ticketer/[employeeId]/breakdown)
- * for the rationale on plain-parameter raw SQL over composed Sql fragments.
+ * One ticketer's trips grouped by day x route, scoped to one of the
+ * cashier's assigned stations — powers the weekly/monthly/all-time
+ * reconciliation drill-down, including looking up someone who no longer
+ * works there (omit dateFrom/dateTo entirely for all time).
  */
 export async function GET(request: NextRequest, context: Context) {
   const auth = await requireCashierAuth(request);
@@ -34,10 +34,16 @@ export async function GET(request: NextRequest, context: Context) {
     const { employeeId } = await context.params;
     if (!employeeId) return badRequest("employeeId is required.");
 
-    const matchNames = await getCashierStationMatchNames(auth.session.employeeId);
+    const { searchParams } = new URL(request.url);
+    const stationId = searchParams.get("stationId")?.trim();
+    if (!stationId) return badRequest("stationId query param is required.");
+    if (!(await assertCashierOwnsStation(auth.session.employeeId, stationId))) {
+      return forbidden("You aren't assigned to this station.");
+    }
+
+    const matchNames = await getCashierStationMatchNames(auth.session.employeeId, stationId);
     if (matchNames.length === 0) return ok({ data: [] });
 
-    const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom")?.trim() || null;
     const dateTo = searchParams.get("dateTo")?.trim() || null;
     const arrivalTerminal = searchParams.get("arrivalTerminal")?.trim() || null;
@@ -54,7 +60,7 @@ export async function GET(request: NextRequest, context: Context) {
         SUM("totalServiceCharge") as "totalServiceCharge"
       FROM "sales_trips"
       WHERE "employeeExternalId" = ${employeeId}
-        AND "departureTerminalName" IN (${Prisma.join(matchNames)})
+        AND "departureTerminalName" = ANY(${matchNames})
         AND (${dateFrom}::timestamp IS NULL OR "date" >= ${dateFrom}::timestamp)
         AND (${dateTo}::timestamp IS NULL OR "date" < ${dateTo}::timestamp + interval '1 day')
         AND (${arrivalTerminal}::text IS NULL OR "arrivalTerminalName" = ${arrivalTerminal}::text)

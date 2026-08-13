@@ -105,8 +105,8 @@ function SubmitForm({ deposit, onSubmitted }: { deposit: Deposit; onSubmitted: (
   }
 
   const inputStyle: React.CSSProperties = {
-    width: "100%", height: 42, padding: "0 12px", borderRadius: 9,
-    border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, color: "var(--foreground)", outline: "none",
+    width: "100%", height: 44, padding: "0 12px", borderRadius: 9,
+    border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 16, color: "var(--foreground)", outline: "none",
   };
 
   return (
@@ -245,9 +245,9 @@ export default function CashierDepositsPage() {
           <div style={{ display: "grid", gap: 14 }}>
             {deposits?.map((d) => (
               <div key={d.id} style={cardStyle}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                  <div>
-                    <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--foreground)" }}>{d.terminal?.name ?? "Terminal"}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", rowGap: 6, gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--foreground)", wordBreak: "break-word" }}>{d.terminal?.name ?? "Terminal"}</div>
                     <div style={{ fontSize: 13, color: "var(--muted-foreground)", marginTop: 2 }}>
                       Expected: <strong style={{ color: "var(--foreground)" }}>{fmtETB(d.expectedAmount)}</strong>
                     </div>

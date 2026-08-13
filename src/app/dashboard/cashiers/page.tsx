@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Wallet, Plus, KeyRound, X, Check, Loader2, AlertCircle,
-  Building2, Users, ShieldAlert, ShieldCheck, Trash2,
+  Building2, Users, ShieldAlert, ShieldCheck, Trash2, UserX,
 } from "lucide-react";
 
 type Assignment = { id: string; isActive: boolean; assignedAt: string; terminal: { id: string; name: string } };
@@ -292,6 +292,19 @@ export default function CashiersPage() {
     }
   }
 
+  async function removeCashier(c: CashierRow) {
+    if (!confirm(
+      `Remove ${c.name} as a cashier?\n\nThis deactivates every station and terminal assignment, clears their PIN, and signs them out everywhere. Their employee record stays — reassign a station and set a new PIN to bring them back later.`
+    )) return;
+    try {
+      await apiFetch(`/api/cashiers/${c.id}`, { method: "DELETE" });
+      await load();
+      setToast(`${c.name} is no longer a cashier.`);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Failed to remove cashier.");
+    }
+  }
+
   const stats = useMemo(() => ({
     total: cashiers.length,
     stations: new Set(cashiers.flatMap(c => c.stationAssignments.filter(a => a.isActive).map(a => a.station.id))).size,
@@ -402,9 +415,14 @@ export default function CashiersPage() {
                           </span>
                         </td>
                         <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                          <button onClick={() => setPinTarget(c)} style={{ height: 32, padding: "0 12px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: "var(--foreground)", fontWeight: 500 }}>
-                            <KeyRound size={12} /> {c.hasPinSet ? "Reset PIN" : "Set PIN"}
-                          </button>
+                          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+                            <button onClick={() => setPinTarget(c)} style={{ height: 32, padding: "0 12px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: "var(--foreground)", fontWeight: 500, whiteSpace: "nowrap" }}>
+                              <KeyRound size={12} /> {c.hasPinSet ? "Reset PIN" : "Set PIN"}
+                            </button>
+                            <button onClick={() => removeCashier(c)} title="Remove cashier access completely" style={{ height: 32, padding: "0 12px", borderRadius: 8, border: "1.5px solid color-mix(in srgb, var(--danger) 40%, var(--border))", background: "var(--surface)", fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: "var(--danger)", fontWeight: 500, whiteSpace: "nowrap" }}>
+                              <UserX size={12} /> Remove
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

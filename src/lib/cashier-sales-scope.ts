@@ -1,14 +1,14 @@
 // src/lib/cashier-sales-scope.ts
 // Resolves which SalesTrip.departureTerminalName values count as "this
-// cashier's sales" — every station they're assigned to (see
-// CashierStationAssignment), matched primarily against the Station's own
-// name rather than routed through Terminal records. Confirmed live: almost
-// no Terminal rows actually exist for the real stations (OTA's reported
-// departure names are effectively station names, not distinct terminal
-// names), so requiring a Terminal match would silently scope a cashier to
-// nothing. Terminal-resolved names are still included too, for whenever
-// terminals do get set up (keeps this consistent with computeExpectedDeposit
-// in src/lib/deposits.ts).
+// cashier's sales" — either every station they're assigned to, or (when a
+// specific stationId is passed) just that one, matched primarily against
+// the Station's own name rather than routed through Terminal records.
+// Confirmed live: almost no Terminal rows actually exist for the real
+// stations (OTA's reported departure names are effectively station names,
+// not distinct terminal names), so requiring a Terminal match would
+// silently scope a cashier to nothing. Terminal-resolved names are still
+// included too, for whenever terminals do get set up (keeps this
+// consistent with computeExpectedDeposit in src/lib/deposits.ts).
 //
 // Matching is case/whitespace-normalized (confirmed live: OTA reports at
 // least one name, "haraqalloo", that only differs from the station's own
@@ -22,9 +22,20 @@ function normalizeName(s: string): string {
   return s.toLowerCase().replace(/\s+/g, "");
 }
 
-export async function getCashierStationMatchNames(employeeId: string): Promise<string[]> {
+// Everything cashier-sales-facing is station-wise now (a cashier covering
+// several stations manages each one separately, not as one merged blob) —
+// this is the shared "does this employee actually cover this station"
+// check every scoped route runs before trusting a client-supplied stationId.
+export async function assertCashierOwnsStation(employeeId: string, stationId: string): Promise<boolean> {
+  const assignment = await prisma.cashierStationAssignment.findUnique({
+    where: { employeeId_stationId: { employeeId, stationId }, isActive: true },
+  });
+  return !!assignment;
+}
+
+export async function getCashierStationMatchNames(employeeId: string, stationId?: string): Promise<string[]> {
   const assignments = await prisma.cashierStationAssignment.findMany({
-    where: { employeeId, isActive: true },
+    where: { employeeId, isActive: true, ...(stationId && { stationId }) },
     select: { stationId: true, station: { select: { name: true } } },
   });
   if (assignments.length === 0) return [];
