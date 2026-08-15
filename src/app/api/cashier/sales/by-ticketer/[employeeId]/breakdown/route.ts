@@ -9,7 +9,7 @@ import { assertCashierOwnsStation, getCashierStationMatchNames } from "@/lib/cas
 type Context = { params: Promise<{ employeeId: string }> };
 
 type RawRow = {
-  day: Date;
+  day: string;
   departureTerminalName: string;
   arrivalTerminalName: string;
   trips: bigint;
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest, context: Context) {
 
     const rows = await prisma.$queryRaw<RawRow[]>`
       SELECT
-        date_trunc('day', "date") as day,
+        to_char(date_trunc('day', "date"), 'YYYY-MM-DD') as day,
         "departureTerminalName",
         "arrivalTerminalName",
         COUNT(*)::bigint as trips,
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest, context: Context) {
       const tariff = r.tariff.toNumber();
       const totalServiceCharge = r.totalServiceCharge.toNumber();
       return {
-        date: r.day.toISOString().slice(0, 10),
+        date: r.day,
         departureTerminalName: r.departureTerminalName,
         arrivalTerminalName: r.arrivalTerminalName,
         trips: Number(r.trips),
