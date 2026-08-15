@@ -11,6 +11,14 @@ export type OtaConfig = {
   companyId: string;
 };
 
+// None of these requests are ever expected to take anywhere near this long —
+// it exists purely so a hung/unresponsive upstream fails fast with a clear
+// timeout error instead of leaving our own request (and, transitively, the
+// GitHub Actions cron trigger and the app's own connection pool slot for it)
+// hanging indefinitely. Confirmed the hard way: a sync got stuck with no
+// timeout and every hourly trigger for hours afterward also came up empty.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export function otaConfigFromEnv(): OtaConfig {
   const baseUrl = process.env.OTA_BASE_URL;
   const email = process.env.OTA_EMAIL;
@@ -83,6 +91,7 @@ export async function otaLogin(config: OtaConfig): Promise<{ token: string; full
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: config.email, password: config.password }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const body = (await res.json().catch(() => ({}))) as OtaLoginResponse;
   const token = body.data?.token;
@@ -111,7 +120,7 @@ export async function fetchOtaTripsPage(
   if (window.from) url.searchParams.set("from", window.from.toISOString());
   if (window.to) url.searchParams.set("to", window.to.toISOString());
 
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (res.status === 429) {
     const body = await res.json().catch(() => ({}) as { retryAfter?: number });
     const headerRetry = Number(res.headers.get("Retry-After"));
@@ -210,7 +219,7 @@ export async function fetchAllOtaCompanyUsers(
     url.searchParams.set("company_id", config.companyId);
     url.searchParams.set("page", String(page));
     url.searchParams.set("limit", String(limit));
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (res.status === 429) {
       const body = await res.json().catch(() => ({}) as { retryAfter?: number });
       const headerRetry = Number(res.headers.get("Retry-After"));
@@ -289,6 +298,7 @@ export async function createOtaCompanyUser(
       employee_id: input.employeeId || undefined,
       joining_date: input.joiningDate || undefined,
     }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   const body = await res.json().catch(() => ({}) as { success?: boolean; error?: string; data?: unknown });
@@ -305,7 +315,7 @@ export async function createOtaCompanyUser(
 
   const getRes = await fetch(
     `${config.baseUrl}/api/company-users?company_id=${config.companyId}&page=1&limit=200`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }
   );
   const getBody = (await getRes.json()) as OtaCompanyUsersResponse;
   const full = getBody.data?.find((r) => r.id === companyUserId);
@@ -351,7 +361,7 @@ export async function fetchAllOtaTerminals(
     const url = new URL(`${config.baseUrl}/api/terminals`);
     url.searchParams.set("page", String(page));
     url.searchParams.set("limit", String(limit));
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (res.status === 429) {
       const body = await res.json().catch(() => ({}) as { retryAfter?: number });
       const headerRetry = Number(res.headers.get("Retry-After"));
@@ -429,7 +439,7 @@ export async function fetchAllOtaVehicles(
     const url = new URL(`${config.baseUrl}/api/vehicles`);
     url.searchParams.set("page", String(page));
     url.searchParams.set("limit", String(limit));
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (res.status === 429) {
       const body = await res.json().catch(() => ({}) as { retryAfter?: number });
       const headerRetry = Number(res.headers.get("Retry-After"));

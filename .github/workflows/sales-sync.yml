@@ -18,7 +18,7 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Trigger sales sync
         run: |
@@ -27,29 +27,26 @@ jobs:
             exit 1
           fi
 
-          attempt_sync() {
-            curl -sS -o response.json -w "%{http_code}" \
-              --max-time 480 \
-              -X POST "${{ vars.SALES_SYNC_URL }}" \
-              -H "x-sync-token: ${{ secrets.SALES_SYNC_TOKEN }}"
-          }
-
-          # One retry only, in case the request landed during a rare cold
-          # start (e.g. right after a Render restart/redeploy) and timed out
-          # or dropped rather than being answered — not a routine occurrence
-          # since the keep-alive workflow keeps the service warm.
-          http_status=$(attempt_sync) || true
-          if [ -z "$http_status" ] || [ "$http_status" -ge 500 ]; then
-            echo "First attempt failed (status: '$http_status'), retrying once..."
-            sleep 15
-            http_status=$(attempt_sync)
-          fi
+          # A full multi-pass sync has been observed taking up to ~14 minutes
+          # server-side (confirmed from sales_sync_logs durations) — the
+          # previous 480s (8min) max-time was shorter than that, so plenty of
+          # genuinely-successful syncs were being reported as failed here
+          # purely because curl gave up before the server finished responding.
+          # No retry: retrying a call that can legitimately take this long
+          # would just double the runtime for no benefit — the route already
+          # guards against overlapping runs itself (skips if one from the
+          # last 30 minutes is still in progress), and next hour's trigger is
+          # the natural retry.
+          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time 900 \
+            -X POST "${{ vars.SALES_SYNC_URL }}" \
+            -H "x-sync-token: ${{ secrets.SALES_SYNC_TOKEN }}") || true
 
           echo "HTTP status: $http_status"
-          cat response.json
+          cat response.json 2>/dev/null
           echo
 
-          if [ "$http_status" -ge 400 ]; then
+          if [ -z "$http_status" ] || [ "$http_status" -ge 400 ]; then
             echo "Sync request failed." >&2
             exit 1
           fi
