@@ -5,7 +5,10 @@
 // into a linked telegramChatId.
 import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage, sendTelegramDocument, getTelegramUpdates, telegramConfigFromEnv } from "./client";
-import { buildDailySalesReport, buildDailyDepositsReport, renderCustomTemplate, resolveReportDate, addisNowParts } from "./reports";
+import {
+  buildDailySalesReport, buildDailyDepositsReport, buildServiceChargeBreakdownReport, buildStationServiceChargeReport,
+  renderCustomTemplate, resolveReportDate, addisNowParts,
+} from "./reports";
 import { buildDetailedWorkbook } from "./workbook";
 import type { $Enums } from "@/generated/prisma/client";
 
@@ -71,32 +74,39 @@ export function isScheduleDueToday(
   }
 }
 
+// One or more message parts to send in sequence — almost always a single
+// element, except DAILY_SERVICE_CHARGE_BREAKDOWN, which can span several
+// messages on a busy day to stay under Telegram's per-message char limit
+// without truncating any station/ticketer/route out of the report.
 export async function buildReportContent(
   schedule: { reportType: $Enums.TelegramReportType; messageTemplate: string | null },
   date: Date
-): Promise<string> {
+): Promise<string[]> {
   switch (schedule.reportType) {
     case "DAILY_SALES_SUMMARY":
-      return buildDailySalesReport(date);
+      return [await buildDailySalesReport(date)];
     case "DAILY_DEPOSITS_SUMMARY":
-      return buildDailyDepositsReport(date);
+      return [await buildDailyDepositsReport(date)];
+    case "DAILY_SERVICE_CHARGE_BREAKDOWN":
+      return buildServiceChargeBreakdownReport(date);
     case "CUSTOM":
-      return renderCustomTemplate(schedule.messageTemplate ?? "", date);
+      return [renderCustomTemplate(schedule.messageTemplate ?? "", date)];
   }
 }
 
 export async function runSchedule(scheduleId: string): Promise<{ sent: number; failed: number }> {
   const schedule = await prisma.telegramSchedule.findUnique({
     where: { id: scheduleId },
-    include: { recipients: { include: { recipient: true } } },
+    include: { recipients: { include: { recipient: { include: { station: { select: { id: true, name: true } } } } } } },
   });
   if (!schedule) throw new Error("Schedule not found.");
+  const reportType = schedule.reportType;
+  const messageTemplate = schedule.messageTemplate;
 
   // Resolved once so the text recap and the attached workbook always agree
   // on exactly which calendar day they cover, even right at a midnight
   // boundary between the two being built.
   const date = resolveReportDate(schedule.reportFor);
-  const content = await buildReportContent(schedule, date);
   const config = telegramConfigFromEnv();
 
   const file = schedule.includeDetailedFile ? await buildDetailedWorkbook(schedule.reportType, date) : null;
@@ -105,46 +115,79 @@ export async function runSchedule(scheduleId: string): Promise<{ sent: number; f
     .map((r) => r.recipient)
     .filter((r) => r.isActive && r.telegramChatId);
 
+  // Station-scoped recipients only apply to DAILY_SERVICE_CHARGE_BREAKDOWN —
+  // everyone else, and every other report type, gets the schedule's one
+  // shared build. Built lazily and cached per distinct scope, so several
+  // recipients on the same station (or the "everyone" build) only trigger
+  // one query each rather than one per recipient.
+  const contentCache = new Map<string, Promise<string[]>>();
+  function contentFor(recipient: (typeof linkedRecipients)[number]): Promise<string[]> {
+    const scoped = reportType === "DAILY_SERVICE_CHARGE_BREAKDOWN" && recipient.stationId && recipient.station;
+    const scopeKey = scoped ? `station:${recipient.stationId}` : "full";
+    let cached = contentCache.get(scopeKey);
+    if (!cached) {
+      cached = scoped
+        ? buildStationServiceChargeReport(date, recipient.stationId!, recipient.station!.name)
+        : buildReportContent({ reportType, messageTemplate }, date);
+      contentCache.set(scopeKey, cached);
+    }
+    return cached;
+  }
+
   let sent = 0;
   let failed = 0;
 
   for (const recipient of linkedRecipients) {
-    try {
-      await sendTelegramMessage(config, recipient.telegramChatId!, content);
-      await prisma.telegramMessageLog.create({
-        data: { scheduleId: schedule.id, recipientId: recipient.id, reportType: schedule.reportType, content, status: "SENT" },
-      });
+    let recipientFailed = false;
+    const contentParts = await contentFor(recipient);
 
-      if (file) {
-        try {
-          await sendTelegramDocument(config, recipient.telegramChatId!, file.buffer, file.filename);
-          await prisma.telegramMessageLog.create({
-            data: { scheduleId: schedule.id, recipientId: recipient.id, reportType: schedule.reportType, content: `[Attached: ${file.filename}]`, status: "SENT" },
-          });
-        } catch (fileError) {
-          await prisma.telegramMessageLog.create({
-            data: {
-              scheduleId: schedule.id, recipientId: recipient.id, reportType: schedule.reportType,
-              content: `[Attached: ${file.filename}]`, status: "FAILED",
-              errorMessage: fileError instanceof Error ? fileError.message : "Unknown error.",
-            },
-          });
-        }
+    // Sent as separate messages in order (almost always just one) rather
+    // than one giant send, so a report that spans Telegram's 4096-char
+    // limit still delivers every part instead of failing outright — a
+    // failure on one part doesn't stop the rest from still going out.
+    for (const part of contentParts) {
+      try {
+        await sendTelegramMessage(config, recipient.telegramChatId!, part);
+        await prisma.telegramMessageLog.create({
+          data: { scheduleId: schedule.id, recipientId: recipient.id, reportType: schedule.reportType, content: part, status: "SENT" },
+        });
+      } catch (error) {
+        recipientFailed = true;
+        await prisma.telegramMessageLog.create({
+          data: {
+            scheduleId: schedule.id,
+            recipientId: recipient.id,
+            reportType: schedule.reportType,
+            content: part,
+            status: "FAILED",
+            errorMessage: error instanceof Error ? error.message : "Unknown error.",
+          },
+        });
       }
+    }
 
-      sent++;
-    } catch (error) {
-      await prisma.telegramMessageLog.create({
-        data: {
-          scheduleId: schedule.id,
-          recipientId: recipient.id,
-          reportType: schedule.reportType,
-          content,
-          status: "FAILED",
-          errorMessage: error instanceof Error ? error.message : "Unknown error.",
-        },
-      });
+    if (file) {
+      try {
+        await sendTelegramDocument(config, recipient.telegramChatId!, file.buffer, file.filename);
+        await prisma.telegramMessageLog.create({
+          data: { scheduleId: schedule.id, recipientId: recipient.id, reportType: schedule.reportType, content: `[Attached: ${file.filename}]`, status: "SENT" },
+        });
+      } catch (fileError) {
+        recipientFailed = true;
+        await prisma.telegramMessageLog.create({
+          data: {
+            scheduleId: schedule.id, recipientId: recipient.id, reportType: schedule.reportType,
+            content: `[Attached: ${file.filename}]`, status: "FAILED",
+            errorMessage: fileError instanceof Error ? fileError.message : "Unknown error.",
+          },
+        });
+      }
+    }
+
+    if (recipientFailed) {
       failed++;
+    } else {
+      sent++;
     }
   }
 

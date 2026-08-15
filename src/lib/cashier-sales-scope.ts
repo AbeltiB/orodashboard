@@ -65,6 +65,35 @@ export async function getCashierStationMatchNames(employeeId: string, stationId?
     .filter((name) => candidateNames.has(normalizeName(name)));
 }
 
+// Same name-matching as getCashierStationMatchNames, minus the cashier
+// assignment requirement — for callers (Telegram station-scoped reports)
+// that just need "what departureTerminalName values count as this station"
+// given a stationId directly, with nobody's assignment to check.
+export async function getStationMatchNames(stationId: string): Promise<string[]> {
+  const station = await prisma.station.findUnique({ where: { id: stationId }, select: { name: true } });
+  if (!station) return [];
+
+  const candidateNames = new Set([normalizeName(station.name)]);
+
+  const terminals = await prisma.terminal.findMany({
+    where: { stationId, isDeleted: false },
+    include: { linkedStation: { select: { name: true } } },
+  });
+  for (const t of terminals) {
+    const name = t.isLinkedStation && t.linkedStation ? t.linkedStation.name : t.name;
+    candidateNames.add(normalizeName(name));
+  }
+
+  const distinctDepartures = await prisma.salesTrip.findMany({
+    distinct: ["departureTerminalName"],
+    select: { departureTerminalName: true },
+  });
+
+  return distinctDepartures
+    .map((d) => d.departureTerminalName)
+    .filter((name) => candidateNames.has(normalizeName(name)));
+}
+
 export async function getCashierAssignedStations(employeeId: string) {
   const assignments = await prisma.cashierStationAssignment.findMany({
     where: { employeeId, isActive: true },

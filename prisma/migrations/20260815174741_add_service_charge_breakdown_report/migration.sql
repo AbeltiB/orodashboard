@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "TelegramReportType" ADD VALUE 'DAILY_SERVICE_CHARGE_BREAKDOWN';

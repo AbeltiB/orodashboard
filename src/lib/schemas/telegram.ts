@@ -1,13 +1,24 @@
 // src/lib/schemas/telegram.ts
 import { z } from "zod";
 
-export const TELEGRAM_REPORT_TYPE_VALUES = ["DAILY_SALES_SUMMARY", "DAILY_DEPOSITS_SUMMARY", "CUSTOM"] as const;
+export const TELEGRAM_REPORT_TYPE_VALUES = ["DAILY_SALES_SUMMARY", "DAILY_DEPOSITS_SUMMARY", "DAILY_SERVICE_CHARGE_BREAKDOWN", "CUSTOM"] as const;
 export const TELEGRAM_REPORT_FOR_VALUES = ["TODAY", "YESTERDAY"] as const;
 export const TELEGRAM_FREQUENCY_VALUES = ["DAILY", "EVERY_N_DAYS", "WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"] as const;
 
 export const createRecipientSchema = z.object({
   label: z.string().min(1).max(100),
   phone: z.string().max(30).optional(),
+  // Which station's slice of a report this recipient should see instead of
+  // the full thing — currently only honored by DAILY_SERVICE_CHARGE_BREAKDOWN.
+  // Omitted/null means "sees everything."
+  stationId: z.string().cuid().nullable().optional(),
+});
+
+export const updateRecipientSchema = z.object({
+  label: z.string().min(1).max(100).optional(),
+  phone: z.string().max(30).nullable().optional(),
+  stationId: z.string().cuid().nullable().optional(),
+  isActive: z.boolean().optional(),
 });
 
 const scheduleFrequencyFields = {

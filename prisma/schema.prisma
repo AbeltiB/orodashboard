@@ -118,6 +118,7 @@ model Station {
   posSessions        PosSession[]
   shiftAssignments   ShiftAssignment[]
   cashierAssignments CashierStationAssignment[]
+  telegramRecipients TelegramRecipient[]
 
   @@index([isDeleted])
   @@index([region])
@@ -752,6 +753,7 @@ model Deposit {
 enum TelegramReportType {
   DAILY_SALES_SUMMARY
   DAILY_DEPOSITS_SUMMARY
+  DAILY_SERVICE_CHARGE_BREAKDOWN
   CUSTOM
 }
 
@@ -780,6 +782,15 @@ model TelegramRecipient {
   label             String    // admin's own name for this person, e.g. "Abelti (Owner)"
   phone             String?   // optional note only — Telegram linking never uses this
 
+  // When set, this recipient only sees their one station's slice of a
+  // report instead of the full thing — a station cashier who should get
+  // just "their" numbers, not everyone's. Currently only honored by
+  // DAILY_SERVICE_CHARGE_BREAKDOWN (see runSchedule); every other report
+  // type still sends its one shared build regardless of this. Null means
+  // "sees everything," same as before this field existed.
+  stationId         String?
+  station           Station?  @relation(fields: [stationId], references: [id], onDelete: SetNull)
+
   // One-time deep-link token (?start=<linkToken>) — consumed the moment the
   // recipient's first /start message is polled (see runUpdatesPoll).
   linkToken         String    @unique
@@ -796,6 +807,7 @@ model TelegramRecipient {
   messages          TelegramMessageLog[]
 
   @@index([isActive])
+  @@index([stationId])
   @@map("telegram_recipients")
 }
 

@@ -8,6 +8,8 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type StationOption = { id: string; name: string; code: string };
+
 type Recipient = {
   id: string;
   label: string;
@@ -18,9 +20,11 @@ type Recipient = {
   telegramFirstName: string | null;
   linkedAt: string | null;
   isActive: boolean;
+  stationId: string | null;
+  station: { id: string; name: string } | null;
 };
 
-type ReportType = "DAILY_SALES_SUMMARY" | "DAILY_DEPOSITS_SUMMARY" | "CUSTOM";
+type ReportType = "DAILY_SALES_SUMMARY" | "DAILY_DEPOSITS_SUMMARY" | "DAILY_SERVICE_CHARGE_BREAKDOWN" | "CUSTOM";
 type ReportFor = "TODAY" | "YESTERDAY";
 type Frequency = "DAILY" | "EVERY_N_DAYS" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
 
@@ -82,6 +86,7 @@ type MessageLog = {
 const REPORT_TYPE_LABELS: Record<ReportType, string> = {
   DAILY_SALES_SUMMARY: "Daily sales summary",
   DAILY_DEPOSITS_SUMMARY: "Daily deposits summary",
+  DAILY_SERVICE_CHARGE_BREAKDOWN: "Daily service charge breakdown",
   CUSTOM: "Custom message",
 };
 
@@ -132,9 +137,10 @@ function Modal({ title, onClose, children, wide }: { title: string; onClose: () 
 
 // ─── Add recipient modal ──────────────────────────────────────────────────────
 
-function AddRecipientModal({ botUsername, onSaved, onClose }: { botUsername: string | null; onSaved: (msg: string) => void; onClose: () => void }) {
+function AddRecipientModal({ botUsername, stations, onSaved, onClose }: { botUsername: string | null; stations: StationOption[]; onSaved: (msg: string) => void; onClose: () => void }) {
   const [label, setLabel] = useState("");
   const [phone, setPhone] = useState("");
+  const [stationId, setStationId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ id: string; label: string; linkToken: string } | null>(null);
@@ -146,7 +152,7 @@ function AddRecipientModal({ botUsername, onSaved, onClose }: { botUsername: str
     try {
       const trimmedPhone = phone.trim();
       const res = await apiFetch<{ id: string; label: string; linkToken: string }>("/api/telegram/recipients", {
-        method: "POST", body: JSON.stringify({ label: label.trim(), phone: trimmedPhone || undefined }),
+        method: "POST", body: JSON.stringify({ label: label.trim(), phone: trimmedPhone || undefined, stationId: stationId || undefined }),
       });
       setCreated(res);
       // Smooth the common case: a phone was given, so text the link right
@@ -211,9 +217,19 @@ function AddRecipientModal({ botUsername, onSaved, onClose }: { botUsername: str
         <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Name</label>
         <input value={label} onChange={e => setLabel(e.target.value)} style={iCss} placeholder="e.g. Abelti (Owner)" autoFocus />
       </div>
-      <div style={{ marginBottom: 18 }}>
+      <div style={{ marginBottom: 14 }}>
         <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Phone (optional note)</label>
         <input value={phone} onChange={e => setPhone(e.target.value)} style={iCss} placeholder="+251900000000" />
+      </div>
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Scope</label>
+        <select style={{ ...iCss, cursor: "pointer" }} value={stationId} onChange={e => setStationId(e.target.value)}>
+          <option value="">Everything (like the owner)</option>
+          {stations.map(s => <option key={s.id} value={s.id}>{s.name} only — station cashier</option>)}
+        </select>
+        <p style={{ fontSize: 11.5, color: "var(--muted-foreground)", marginTop: 6, lineHeight: 1.5 }}>
+          A station only sees that station&apos;s service charge breakdown, not everyone&apos;s — applies to the daily service charge report only.
+        </p>
       </div>
       {error && (
         <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "var(--danger-bg)", borderRadius: 8, marginBottom: 14 }}>
@@ -226,6 +242,60 @@ function AddRecipientModal({ botUsername, onSaved, onClose }: { botUsername: str
         <button onClick={save} disabled={!label.trim() || saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: label.trim() && !saving ? 1 : 0.5, display: "flex", alignItems: "center", gap: 7 }}>
           {saving && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
           Add
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Edit recipient scope modal ────────────────────────────────────────────────
+
+function EditRecipientScopeModal({ recipient, stations, onSaved, onClose }: {
+  recipient: Recipient; stations: StationOption[]; onSaved: (msg: string) => void; onClose: () => void;
+}) {
+  const [stationId, setStationId] = useState(recipient.stationId ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true); setError(null);
+    try {
+      await apiFetch(`/api/telegram/recipients/${recipient.id}`, {
+        method: "PATCH", body: JSON.stringify({ stationId: stationId || null }),
+      });
+      onSaved(`${recipient.label}'s scope updated.`);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={`Scope — ${recipient.label}`} onClose={onClose}>
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Scope</label>
+        <select style={{ ...iCss, cursor: "pointer" }} value={stationId} onChange={e => setStationId(e.target.value)}>
+          <option value="">Everything (like the owner)</option>
+          {stations.map(s => <option key={s.id} value={s.id}>{s.name} only — station cashier</option>)}
+        </select>
+        <p style={{ fontSize: 11.5, color: "var(--muted-foreground)", marginTop: 6, lineHeight: 1.5 }}>
+          A station only sees that station&apos;s service charge breakdown, not everyone&apos;s — applies to the daily service charge report only.
+        </p>
+      </div>
+      {error && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: "var(--danger-bg)", borderRadius: 8, marginBottom: 14 }}>
+          <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 13, color: "var(--danger)" }}>{error}</span>
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button onClick={onClose} style={{ height: 40, padding: "0 18px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", fontSize: 14, cursor: "pointer", color: "var(--foreground)" }}>Cancel</button>
+        <button onClick={save} disabled={saving} style={{ height: 40, padding: "0 22px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: saving ? 0.5 : 1, display: "flex", alignItems: "center", gap: 7 }}>
+          {saving && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
+          Save
         </button>
       </div>
     </Modal>
@@ -378,7 +448,7 @@ function ScheduleModal({ initial, recipients, onSaved, onClose }: {
         </div>
       )}
 
-      {reportType !== "CUSTOM" && (
+      {(reportType === "DAILY_SALES_SUMMARY" || reportType === "DAILY_DEPOSITS_SUMMARY") && (
         <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18, padding: "10px 12px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--background)", cursor: "pointer" }}>
           <input type="checkbox" checked={includeDetailedFile} onChange={e => setIncludeDetailedFile(e.target.checked)} style={{ marginTop: 2 }} />
           <span>
@@ -390,6 +460,12 @@ function ScheduleModal({ initial, recipients, onSaved, onClose }: {
             </span>
           </span>
         </label>
+      )}
+
+      {reportType === "DAILY_SERVICE_CHARGE_BREAKDOWN" && (
+        <div style={{ marginBottom: 18, padding: "10px 12px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--background)", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
+          Service charge only, broken down by station → ticketer → route, with a subtotal at every level and a grand total — sent as plain Telegram text (split across multiple messages on a busy day rather than truncated). No file attachment for this report type.
+        </div>
       )}
 
       {reportType === "CUSTOM" && (
@@ -504,21 +580,25 @@ export default function TelegramPage() {
   const [checkingReplies, setCheckingReplies] = useState(false);
   const [runningNow, setRunningNow] = useState<string | null>(null);
 
+  const [stations, setStations] = useState<StationOption[]>([]);
   const [showAddRecipient, setShowAddRecipient] = useState(false);
   const [scheduleModal, setScheduleModal] = useState<"new" | Schedule | null>(null);
+  const [scopeModalRecipient, setScopeModalRecipient] = useState<Recipient | null>(null);
   const [sendingLinkId, setSendingLinkId] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [statusRes, recipientsRes, schedulesRes, messagesRes] = await Promise.all([
+    const [statusRes, recipientsRes, schedulesRes, messagesRes, stationsRes] = await Promise.all([
       apiFetch<{ connected: boolean; username?: string; message?: string }>("/api/telegram/status").catch(() => ({ connected: false })),
       apiFetch<{ data: Recipient[] }>("/api/telegram/recipients"),
       apiFetch<{ data: Schedule[] }>("/api/telegram/schedules"),
       apiFetch<{ data: MessageLog[] }>("/api/telegram/messages?limit=30"),
+      apiFetch<{ data: StationOption[] }>("/api/stations?limit=1000"),
     ]);
     setStatus(statusRes);
     setRecipients(recipientsRes.data);
     setSchedules(schedulesRes.data);
     setMessages(messagesRes.data);
+    setStations(stationsRes.data.map(s => ({ id: s.id, name: s.name, code: s.code })));
   }, []);
 
   useEffect(() => {
@@ -627,7 +707,10 @@ export default function TelegramPage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } } * { box-sizing: border-box; }`}</style>
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
       {showAddRecipient && (
-        <AddRecipientModal botUsername={status?.username ?? null} onSaved={(msg) => { setToast(msg); loadAll(); }} onClose={() => setShowAddRecipient(false)} />
+        <AddRecipientModal botUsername={status?.username ?? null} stations={stations} onSaved={(msg) => { setToast(msg); loadAll(); }} onClose={() => setShowAddRecipient(false)} />
+      )}
+      {scopeModalRecipient && (
+        <EditRecipientScopeModal recipient={scopeModalRecipient} stations={stations} onSaved={(msg) => { setToast(msg); loadAll(); }} onClose={() => setScopeModalRecipient(null)} />
       )}
       {scheduleModal && (
         <ScheduleModal
@@ -690,7 +773,7 @@ export default function TelegramPage() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}>
-                    {["Name", "Phone", "Telegram", "Status", "Link", ""].map(h => (
+                    {["Name", "Phone", "Scope", "Telegram", "Status", "Link", ""].map(h => (
                       <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</th>
                     ))}
                   </tr>
@@ -700,6 +783,11 @@ export default function TelegramPage() {
                     <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
                       <td style={{ padding: "10px 14px", fontWeight: 600, color: "var(--foreground)" }}>{r.label}</td>
                       <td style={{ padding: "10px 14px", color: "var(--muted-foreground)" }}>{r.phone ?? "—"}</td>
+                      <td style={{ padding: "10px 14px" }}>
+                        <button onClick={() => setScopeModalRecipient(r)} title="Change scope" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, border: "none", cursor: "pointer", background: r.station ? "#dbeafe" : "#f1f5f9", color: r.station ? "#1d4ed8" : "#64748b" }}>
+                          {r.station ? r.station.name : "Everything"} <Pencil size={10} />
+                        </button>
+                      </td>
                       <td style={{ padding: "10px 14px", color: "var(--muted-foreground)" }}>{r.telegramUsername ? `@${r.telegramUsername}` : r.telegramFirstName ?? "—"}</td>
                       <td style={{ padding: "10px 14px" }}>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: r.isLinked ? "#dcfce7" : "#f1f5f9", color: r.isLinked ? "#16a34a" : "#64748b" }}>

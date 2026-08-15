@@ -7,6 +7,7 @@
 // that same calendar day.
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/api-utils";
+import { getStationMatchNames } from "@/lib/cashier-sales-scope";
 import type { $Enums } from "@/generated/prisma/client";
 
 const ADDIS_TZ = "Africa/Addis_Ababa";
@@ -163,6 +164,170 @@ export async function buildDailyDepositsReport(date: Date): Promise<string> {
   }
 
   return lines.join("\n");
+}
+
+function fmtAddisTime(instant: Date): string {
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: ADDIS_TZ }).format(instant);
+}
+
+// station -> ticketer -> route -> service-charge amount, plus running totals
+// at every level — the shape the daily service-charge breakdown report
+// walks to render its per-station blocks. Reused as-is for the single-
+// station variant too (just one entry, built directly rather than grouped
+// out of a multi-station map).
+type RouteAmounts = Map<string, number>;
+type TicketerBucket = { name: string; routes: RouteAmounts; total: number };
+type StationBucket = { ticketers: Map<string, TicketerBucket>; total: number };
+
+// "Last successful sync was HH:MM" (or a staleness/missing-sync warning) —
+// shared by both the full and single-station service-charge reports.
+// Deliberately doesn't force a sync itself (that can take ~14 minutes and
+// this report is built inside runDueSchedules, which the polling cron
+// expects to answer in seconds — forcing a sync in here would just recreate
+// the exact curl-times-out-on-a-slow-response problem already hit and fixed
+// for the sales-sync cron). Instead it's transparent about freshness rather
+// than assuming it away, relying on the hourly sync cron having already
+// caught up several times over between the ~19:00 operational cutoff and a
+// 22:00 send time.
+async function buildSyncFreshnessNote(): Promise<string> {
+  const lastSync = await prisma.salesSyncLog.findFirst({
+    // finishedAt is nullable (a run that's still in progress, or — rarely —
+    // one whose final update never landed) and Postgres sorts NULLs first
+    // on a DESC order by default, so without this filter a never-finalized
+    // row would masquerade as "the most recent sync" ahead of every real one.
+    where: { status: "SUCCESS", finishedAt: { not: null } },
+    orderBy: { finishedAt: "desc" },
+    select: { finishedAt: true },
+  });
+  const syncAgeMin = lastSync?.finishedAt ? Math.round((Date.now() - lastSync.finishedAt.getTime()) / 60000) : null;
+  if (syncAgeMin === null) return `⚠️ No completed sync on record — these numbers may be incomplete.\n\n`;
+  if (syncAgeMin > 90) {
+    return `⚠️ Last successful sync was ${fmtAddisTime(lastSync!.finishedAt!)} (${Math.floor(syncAgeMin / 60)}h ${syncAgeMin % 60}m ago) — today's numbers might not be fully caught up.\n\n`;
+  }
+  return `✅ Synced as of ${fmtAddisTime(lastSync!.finishedAt!)} Addis time.\n\n`;
+}
+
+function renderStationBlock(stationName: string, station: StationBucket): string {
+  const lines = [`🏢 <b>${stationName}</b> — ${fmtETB(station.total)}`];
+  const sortedTicketers = [...station.ticketers.values()].sort((a, b) => b.total - a.total);
+  for (const ticketer of sortedTicketers) {
+    lines.push(`  👤 ${ticketer.name} — <b>${fmtETB(ticketer.total)}</b>`);
+    const sortedRoutes = [...ticketer.routes.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [route, amount] of sortedRoutes) {
+      lines.push(`      • ${route}: ${fmtETB(amount)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+// Packs pre-rendered blocks into as many messages as needed to stay under
+// Telegram's 4096-char cap — never truncating/dropping data (every figure in
+// a reconciliation report has to actually show up somewhere), just spreading
+// it across more messages instead. `finalBlock` (a totals line) is kept
+// attached to the last block wherever it fits, otherwise sent as its own
+// trailing message.
+function packIntoMessages(prefix: string, blocks: string[], finalBlock: string): string[] {
+  const messages: string[] = [];
+  let current = prefix;
+  for (const block of blocks) {
+    const candidate = current + "\n\n" + block;
+    if (candidate.length > TELEGRAM_TEXT_LIMIT - 100) {
+      messages.push(current);
+      current = block;
+    } else {
+      current = candidate;
+    }
+  }
+  const withFinal = current + "\n\n" + finalBlock;
+  if (withFinal.length > TELEGRAM_TEXT_LIMIT - 100) {
+    messages.push(current);
+    messages.push(finalBlock);
+  } else {
+    messages.push(withFinal);
+  }
+  return messages.length > 1 ? messages.map((m, i) => `${m}\n\n(${i + 1}/${messages.length})`) : messages;
+}
+
+// Sent nightly (intended for 22:00 Addis time) as the "final for the day"
+// service-charge reconciliation across every station — station -> ticketer
+// -> route, with a subtotal at every level and a grand total at the end.
+export async function buildServiceChargeBreakdownReport(date: Date): Promise<string[]> {
+  const { from, to } = dayRange(date);
+  const label = fmtDateLabel(date);
+  const syncNote = await buildSyncFreshnessNote();
+
+  const rows = await prisma.salesTrip.groupBy({
+    by: ["departureTerminalName", "employeeExternalId", "employeeName", "arrivalTerminalName"],
+    where: { date: { gte: from, lt: to }, employeeExternalId: { not: null } },
+    _sum: { totalServiceCharge: true },
+  });
+
+  const titleLine = `<b>Service Charge Breakdown — ${label}</b>`;
+  if (rows.length === 0) {
+    return [`${syncNote}${titleLine}\n\nNo trips recorded for this day.`];
+  }
+
+  const stations = new Map<string, StationBucket>();
+  let grandTotal = 0;
+
+  for (const r of rows) {
+    const amount = toNumber(r._sum.totalServiceCharge ?? 0);
+    if (amount === 0) continue;
+    const station = stations.get(r.departureTerminalName) ?? { ticketers: new Map(), total: 0 };
+    const ticketerKey = r.employeeExternalId as string;
+    const ticketer = station.ticketers.get(ticketerKey) ?? { name: r.employeeName ?? "Unknown", routes: new Map(), total: 0 };
+    ticketer.routes.set(r.arrivalTerminalName, (ticketer.routes.get(r.arrivalTerminalName) ?? 0) + amount);
+    ticketer.total += amount;
+    station.ticketers.set(ticketerKey, ticketer);
+    station.total += amount;
+    stations.set(r.departureTerminalName, station);
+    grandTotal += amount;
+  }
+
+  const sortedStations = [...stations.entries()].sort((a, b) => b[1].total - a[1].total);
+  const stationBlocks = sortedStations.map(([stationName, station]) => renderStationBlock(stationName, station));
+  const grandTotalBlock = `<b>Grand total — ${label}: ${fmtETB(grandTotal)}</b>`;
+
+  return packIntoMessages(syncNote + titleLine, stationBlocks, grandTotalBlock);
+}
+
+// Same report, scoped to one station's own departureTerminalName-matched
+// trips — for a recipient (e.g. a station cashier) who should only ever see
+// their own station's numbers, never anyone else's.
+export async function buildStationServiceChargeReport(date: Date, stationId: string, stationName: string): Promise<string[]> {
+  const { from, to } = dayRange(date);
+  const label = fmtDateLabel(date);
+  const syncNote = await buildSyncFreshnessNote();
+  const titleLine = `<b>${stationName} — Service Charge — ${label}</b>`;
+
+  const matchNames = await getStationMatchNames(stationId);
+  if (matchNames.length === 0) {
+    return [`${syncNote}${titleLine}\n\nNo trips recorded for this day.`];
+  }
+
+  const rows = await prisma.salesTrip.groupBy({
+    by: ["employeeExternalId", "employeeName", "arrivalTerminalName"],
+    where: { date: { gte: from, lt: to }, employeeExternalId: { not: null }, departureTerminalName: { in: matchNames } },
+    _sum: { totalServiceCharge: true },
+  });
+  if (rows.length === 0) {
+    return [`${syncNote}${titleLine}\n\nNo trips recorded for this day.`];
+  }
+
+  const station: StationBucket = { ticketers: new Map(), total: 0 };
+  for (const r of rows) {
+    const amount = toNumber(r._sum.totalServiceCharge ?? 0);
+    if (amount === 0) continue;
+    const ticketerKey = r.employeeExternalId as string;
+    const ticketer = station.ticketers.get(ticketerKey) ?? { name: r.employeeName ?? "Unknown", routes: new Map(), total: 0 };
+    ticketer.routes.set(r.arrivalTerminalName, (ticketer.routes.get(r.arrivalTerminalName) ?? 0) + amount);
+    ticketer.total += amount;
+    station.ticketers.set(ticketerKey, ticketer);
+    station.total += amount;
+  }
+
+  const totalBlock = `<b>Total for ${stationName} — ${label}: ${fmtETB(station.total)}</b>`;
+  return packIntoMessages(syncNote + titleLine, [renderStationBlock(stationName, station)], totalBlock);
 }
 
 export function renderCustomTemplate(template: string, date: Date): string {
