@@ -331,15 +331,13 @@ export async function buildStationServiceChargeReport(date: Date, stationId: str
   return packIntoMessages(syncNote + titleLine, [renderStationBlock(stationName, station)], totalBlock);
 }
 
-// Fires on the 1st of every Ethiopian-calendar month (see isScheduleDueToday's
-// ETHIOPIAN_MONTHLY case) and closes out the month that just ended — the
-// Ethiopian months run 30 days each except Pagume (5, or 6 in an Ethiopian
-// leap year), so this always resolves the *previous* Ethiopian month's real
-// boundaries rather than assuming a fixed length. Revenue (tariff) and
-// service charge are reported as two separate figures, unlike the daily
-// sales report, whose "Total revenue" line is actually the service-charge
-// sum alone — this one shows both correctly.
-export async function buildMonthlySalesReport(now: Date = new Date()): Promise<string[]> {
+// The Gregorian [from, to) range for the Ethiopian-calendar month just
+// before `now`'s Ethiopian month — the Ethiopian months run 30 days each
+// except Pagume (5, or 6 in an Ethiopian leap year), so this resolves the
+// *actual* previous-month boundaries rather than assuming a fixed length.
+// Shared by the monthly report's text and its Excel attachment so both
+// always agree on exactly the same period.
+export function resolvePreviousEthiopianMonthRange(now: Date = new Date()): { from: Date; to: Date; label: string; gregorianRange: string } {
   const today = dateToEthiopian(now);
   const prevMonth = today.month === 1 ? 13 : today.month - 1;
   const prevYear = today.month === 1 ? today.year - 1 : today.year;
@@ -351,6 +349,16 @@ export async function buildMonthlySalesReport(now: Date = new Date()): Promise<s
 
   const label = `${ETHIOPIAN_MONTH_NAMES[prevMonth - 1]} ${prevYear}`;
   const gregorianRange = `${fmtDateLabel(from)} – ${fmtDateLabel(new Date(to.getTime() - 86400000))}`;
+  return { from, to, label, gregorianRange };
+}
+
+// Fires on the 1st of every Ethiopian-calendar month (see isScheduleDueToday's
+// ETHIOPIAN_MONTHLY case) and closes out the month that just ended. Revenue
+// (tariff) and service charge are reported as two separate figures, unlike
+// the daily sales report, whose "Total revenue" line is actually the
+// service-charge sum alone — this one shows both correctly.
+export async function buildMonthlySalesReport(now: Date = new Date()): Promise<string[]> {
+  const { from, to, label, gregorianRange } = resolvePreviousEthiopianMonthRange(now);
   const syncNote = await buildSyncFreshnessNote();
   const titleLine = `<b>Monthly Sales Summary — ${label}</b>\n<i>${gregorianRange}</i>`;
 

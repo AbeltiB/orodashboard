@@ -451,7 +451,7 @@ function ScheduleModal({ initial, recipients, onSaved, onClose }: {
         </div>
       )}
 
-      {(reportType === "DAILY_SALES_SUMMARY" || reportType === "DAILY_DEPOSITS_SUMMARY") && (
+      {(reportType === "DAILY_SALES_SUMMARY" || reportType === "DAILY_DEPOSITS_SUMMARY" || reportType === "MONTHLY_SALES_SUMMARY") && (
         <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18, padding: "10px 12px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--background)", cursor: "pointer" }}>
           <input type="checkbox" checked={includeDetailedFile} onChange={e => setIncludeDetailedFile(e.target.checked)} style={{ marginTop: 2 }} />
           <span>
@@ -459,7 +459,9 @@ function ScheduleModal({ initial, recipients, onSaved, onClose }: {
             <span style={{ display: "block", fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>
               {reportType === "DAILY_SALES_SUMMARY"
                 ? "Every trip that day, plus rollups by station, ticketer, and route — sent alongside the short text recap."
-                : "Every deposit that day, plus a per-terminal rollup — sent alongside the short text recap."}
+                : reportType === "DAILY_DEPOSITS_SUMMARY"
+                ? "Every deposit that day, plus a per-terminal rollup — sent alongside the short text recap."
+                : "Every trip for the whole Ethiopian month, plus rollups by station, ticketer, and route — sent alongside the short text recap."}
             </span>
           </span>
         </label>
@@ -473,7 +475,7 @@ function ScheduleModal({ initial, recipients, onSaved, onClose }: {
 
       {reportType === "MONTHLY_SALES_SUMMARY" && (
         <div style={{ marginBottom: 18, padding: "10px 12px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--background)", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
-          Revenue and service charge (shown separately), broken down by station, for the Ethiopian-calendar month that just ended — set Frequency to &ldquo;Monthly (Ethiopian calendar)&rdquo; below so it fires automatically on the 1st of each Ethiopian month. Sent as plain Telegram text, no file attachment.
+          Revenue and service charge (shown separately), broken down by station, for the Ethiopian-calendar month that just ended — set Frequency to &ldquo;Monthly (Ethiopian calendar)&rdquo; below so it fires automatically on the 1st of each Ethiopian month.
         </div>
       )}
 

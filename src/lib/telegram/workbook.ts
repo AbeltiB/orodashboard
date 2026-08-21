@@ -7,6 +7,7 @@
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/api-utils";
+import { resolvePreviousEthiopianMonthRange } from "./reports";
 import type { $Enums } from "@/generated/prisma/client";
 
 function dayRange(date: Date): { from: Date; to: Date } {
@@ -45,8 +46,7 @@ function addToAcc(acc: Accumulator, t: { passengers: number; distanceKm: unknown
   acc.totalServiceCharge += toNumber(t.totalServiceCharge);
 }
 
-async function buildSalesWorkbook(date: Date): Promise<ExcelJS.Workbook> {
-  const { from, to } = dayRange(date);
+async function buildSalesWorkbook(from: Date, to: Date, title: string, periodLabel: string): Promise<ExcelJS.Workbook> {
   const trips = await prisma.salesTrip.findMany({
     where: { date: { gte: from, lt: to } },
     orderBy: { date: "asc" },
@@ -61,7 +61,7 @@ async function buildSalesWorkbook(date: Date): Promise<ExcelJS.Workbook> {
   for (const t of trips) addToAcc(grand, t);
   const summary = workbook.addWorksheet("Summary");
   summary.columns = [{ width: 28 }, { width: 20 }];
-  summary.addRow(["Daily Sales — full detail", fmtDateLabel(date)]).font = { bold: true, size: 13 };
+  summary.addRow([title, periodLabel]).font = { bold: true, size: 13 };
   summary.addRow([]);
   summary.addRow(["Total trips", grand.trips]);
   summary.addRow(["Total passengers", grand.passengers]);
@@ -249,7 +249,8 @@ export async function buildDetailedWorkbook(
   const dateKey = date.toISOString().slice(0, 10);
 
   if (reportType === "DAILY_SALES_SUMMARY") {
-    const workbook = await buildSalesWorkbook(date);
+    const { from, to } = dayRange(date);
+    const workbook = await buildSalesWorkbook(from, to, "Daily Sales — full detail", fmtDateLabel(date));
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     return { buffer: Buffer.from(arrayBuffer), filename: `sales-detail-${dateKey}.xlsx` };
   }
@@ -258,6 +259,17 @@ export async function buildDetailedWorkbook(
     const workbook = await buildDepositsWorkbook(date);
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     return { buffer: Buffer.from(arrayBuffer), filename: `deposits-detail-${dateKey}.xlsx` };
+  }
+
+  if (reportType === "MONTHLY_SALES_SUMMARY") {
+    // Ignores the passed `date` and resolves its own "previous Ethiopian
+    // month" range, same as buildMonthlySalesReport's text — keeps the
+    // attached file and the recap always describing the same period.
+    const { from, to, label, gregorianRange } = resolvePreviousEthiopianMonthRange();
+    const workbook = await buildSalesWorkbook(from, to, "Monthly Sales — full detail", `${label} (${gregorianRange})`);
+    const arrayBuffer = await workbook.xlsx.writeBuffer();
+    const fileLabel = label.replace(/\s+/g, "-");
+    return { buffer: Buffer.from(arrayBuffer), filename: `sales-detail-${fileLabel}.xlsx` };
   }
 
   return null;
