@@ -7,9 +7,10 @@ import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage, sendTelegramDocument, getTelegramUpdates, telegramConfigFromEnv } from "./client";
 import {
   buildDailySalesReport, buildDailyDepositsReport, buildServiceChargeBreakdownReport, buildStationServiceChargeReport,
-  renderCustomTemplate, resolveReportDate, addisNowParts,
+  buildMonthlySalesReport, renderCustomTemplate, resolveReportDate, addisNowParts,
 } from "./reports";
 import { buildDetailedWorkbook } from "./workbook";
+import { gregorianToEthiopian } from "@/lib/ethiopian-calendar";
 import type { $Enums } from "@/generated/prisma/client";
 
 const UPDATES_OFFSET_KEY = "telegram_updates_offset";
@@ -71,6 +72,11 @@ export function isScheduleDueToday(
       if (month !== schedule.monthOfYear) return false;
       return day === Math.min(schedule.dayOfMonth, lastDayOfMonth(year, month));
     }
+
+    case "ETHIOPIAN_MONTHLY":
+      // Every Ethiopian month's 1st day — a moving Gregorian date, so no
+      // dayOfMonth field to check, just convert today and look at its day.
+      return gregorianToEthiopian(year, month, day).day === 1;
   }
 }
 
@@ -89,6 +95,11 @@ export async function buildReportContent(
       return [await buildDailyDepositsReport(date)];
     case "DAILY_SERVICE_CHARGE_BREAKDOWN":
       return buildServiceChargeBreakdownReport(date);
+    case "MONTHLY_SALES_SUMMARY":
+      // Ignores reportFor/date — always resolves its own "previous Ethiopian
+      // month" range relative to right now, same precedent as CUSTOM
+      // ignoring reportFor for its {{date}} placeholder.
+      return buildMonthlySalesReport();
     case "CUSTOM":
       return [renderCustomTemplate(schedule.messageTemplate ?? "", date)];
   }

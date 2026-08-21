@@ -8,6 +8,7 @@
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/api-utils";
 import { getStationMatchNames } from "@/lib/cashier-sales-scope";
+import { dateToEthiopian, ethiopianToGregorian, ETHIOPIAN_MONTH_NAMES } from "@/lib/ethiopian-calendar";
 import type { $Enums } from "@/generated/prisma/client";
 
 const ADDIS_TZ = "Africa/Addis_Ababa";
@@ -328,6 +329,79 @@ export async function buildStationServiceChargeReport(date: Date, stationId: str
 
   const totalBlock = `<b>Total for ${stationName} — ${label}: ${fmtETB(station.total)}</b>`;
   return packIntoMessages(syncNote + titleLine, [renderStationBlock(stationName, station)], totalBlock);
+}
+
+// Fires on the 1st of every Ethiopian-calendar month (see isScheduleDueToday's
+// ETHIOPIAN_MONTHLY case) and closes out the month that just ended — the
+// Ethiopian months run 30 days each except Pagume (5, or 6 in an Ethiopian
+// leap year), so this always resolves the *previous* Ethiopian month's real
+// boundaries rather than assuming a fixed length. Revenue (tariff) and
+// service charge are reported as two separate figures, unlike the daily
+// sales report, whose "Total revenue" line is actually the service-charge
+// sum alone — this one shows both correctly.
+export async function buildMonthlySalesReport(now: Date = new Date()): Promise<string[]> {
+  const today = dateToEthiopian(now);
+  const prevMonth = today.month === 1 ? 13 : today.month - 1;
+  const prevYear = today.month === 1 ? today.year - 1 : today.year;
+
+  const fromG = ethiopianToGregorian(prevYear, prevMonth, 1);
+  const toG = ethiopianToGregorian(today.year, today.month, 1); // exclusive — this Ethiopian month's own day 1
+  const from = new Date(Date.UTC(fromG.year, fromG.month - 1, fromG.day));
+  const to = new Date(Date.UTC(toG.year, toG.month - 1, toG.day));
+
+  const label = `${ETHIOPIAN_MONTH_NAMES[prevMonth - 1]} ${prevYear}`;
+  const gregorianRange = `${fmtDateLabel(from)} – ${fmtDateLabel(new Date(to.getTime() - 86400000))}`;
+  const syncNote = await buildSyncFreshnessNote();
+  const titleLine = `<b>Monthly Sales Summary — ${label}</b>\n<i>${gregorianRange}</i>`;
+
+  const [aggregate, byStation] = await Promise.all([
+    prisma.salesTrip.aggregate({
+      where: { date: { gte: from, lt: to } },
+      _sum: { tariff: true, totalServiceCharge: true, passengers: true },
+      _count: { _all: true },
+    }),
+    prisma.salesTrip.groupBy({
+      by: ["departureTerminalName"],
+      where: { date: { gte: from, lt: to } },
+      _sum: { tariff: true, totalServiceCharge: true, passengers: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  if (aggregate._count._all === 0) {
+    return [`${syncNote}${titleLine}\n\nNo trips recorded for this month.`];
+  }
+
+  const totalRevenue = toNumber(aggregate._sum.tariff ?? 0);
+  const totalServiceCharge = toNumber(aggregate._sum.totalServiceCharge ?? 0);
+  const totalCollected = totalRevenue + totalServiceCharge;
+
+  const header = [
+    syncNote + titleLine,
+    ``,
+    `Trips: <b>${aggregate._count._all.toLocaleString()}</b>`,
+    `Passengers: <b>${(aggregate._sum.passengers ?? 0).toLocaleString()}</b>`,
+    `Revenue: <b>${fmtETB(totalRevenue)}</b>`,
+    `Service charge: <b>${fmtETB(totalServiceCharge)}</b>`,
+    `Total collected: <b>${fmtETB(totalCollected)}</b>`,
+    ``,
+    `By station (${byStation.length}):`,
+  ].join("\n");
+
+  const sortedStations = [...byStation].sort((a, b) => {
+    const totalA = toNumber(a._sum.tariff ?? 0) + toNumber(a._sum.totalServiceCharge ?? 0);
+    const totalB = toNumber(b._sum.tariff ?? 0) + toNumber(b._sum.totalServiceCharge ?? 0);
+    return totalB - totalA;
+  });
+
+  const stationBlocks = sortedStations.map((s) => {
+    const revenue = toNumber(s._sum.tariff ?? 0);
+    const svc = toNumber(s._sum.totalServiceCharge ?? 0);
+    return `🏢 <b>${s.departureTerminalName}</b> — ${s._count._all.toLocaleString()} trips\n   Revenue: ${fmtETB(revenue)} · Service charge: ${fmtETB(svc)} · Total: ${fmtETB(revenue + svc)}`;
+  });
+
+  const grandTotalBlock = `<b>Grand total — ${label}: ${fmtETB(totalCollected)}</b>`;
+  return packIntoMessages(header, stationBlocks, grandTotalBlock);
 }
 
 export function renderCustomTemplate(template: string, date: Date): string {

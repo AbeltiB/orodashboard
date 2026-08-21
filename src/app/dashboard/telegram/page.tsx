@@ -24,9 +24,9 @@ type Recipient = {
   station: { id: string; name: string } | null;
 };
 
-type ReportType = "DAILY_SALES_SUMMARY" | "DAILY_DEPOSITS_SUMMARY" | "DAILY_SERVICE_CHARGE_BREAKDOWN" | "CUSTOM";
+type ReportType = "DAILY_SALES_SUMMARY" | "DAILY_DEPOSITS_SUMMARY" | "DAILY_SERVICE_CHARGE_BREAKDOWN" | "MONTHLY_SALES_SUMMARY" | "CUSTOM";
 type ReportFor = "TODAY" | "YESTERDAY";
-type Frequency = "DAILY" | "EVERY_N_DAYS" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+type Frequency = "DAILY" | "EVERY_N_DAYS" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY" | "ETHIOPIAN_MONTHLY";
 
 type Schedule = {
   id: string;
@@ -53,9 +53,10 @@ const FREQUENCY_LABELS: Record<Frequency, string> = {
   DAILY: "Daily",
   EVERY_N_DAYS: "Every N days",
   WEEKLY: "Weekly",
-  MONTHLY: "Monthly",
+  MONTHLY: "Monthly (Gregorian)",
   QUARTERLY: "Quarterly",
   YEARLY: "Yearly",
+  ETHIOPIAN_MONTHLY: "Monthly (Ethiopian calendar)",
 };
 
 const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -69,6 +70,7 @@ function describeFrequency(s: Schedule): string {
     case "MONTHLY": return `Monthly · day ${s.dayOfMonth ?? "?"}`;
     case "QUARTERLY": return `Quarterly · day ${s.dayOfMonth ?? "?"} (Jan/Apr/Jul/Oct)`;
     case "YEARLY": return `Yearly · ${MONTH_LABELS[(s.monthOfYear ?? 1) - 1]} ${s.dayOfMonth ?? "?"}`;
+    case "ETHIOPIAN_MONTHLY": return "1st of every Ethiopian month";
   }
 }
 
@@ -87,6 +89,7 @@ const REPORT_TYPE_LABELS: Record<ReportType, string> = {
   DAILY_SALES_SUMMARY: "Daily sales summary",
   DAILY_DEPOSITS_SUMMARY: "Daily deposits summary",
   DAILY_SERVICE_CHARGE_BREAKDOWN: "Daily service charge breakdown",
+  MONTHLY_SALES_SUMMARY: "Monthly sales summary (Ethiopian calendar)",
   CUSTOM: "Custom message",
 };
 
@@ -438,7 +441,7 @@ function ScheduleModal({ initial, recipients, onSaved, onClose }: {
         )}
       </div>
 
-      {reportType !== "CUSTOM" && (
+      {reportType !== "CUSTOM" && reportType !== "MONTHLY_SALES_SUMMARY" && (
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Covers</label>
           <select style={{ ...iCss, cursor: "pointer" }} value={reportFor} onChange={e => setReportFor(e.target.value as ReportFor)}>
@@ -465,6 +468,12 @@ function ScheduleModal({ initial, recipients, onSaved, onClose }: {
       {reportType === "DAILY_SERVICE_CHARGE_BREAKDOWN" && (
         <div style={{ marginBottom: 18, padding: "10px 12px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--background)", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
           Service charge only, broken down by station → ticketer → route, with a subtotal at every level and a grand total — sent as plain Telegram text (split across multiple messages on a busy day rather than truncated). No file attachment for this report type.
+        </div>
+      )}
+
+      {reportType === "MONTHLY_SALES_SUMMARY" && (
+        <div style={{ marginBottom: 18, padding: "10px 12px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--background)", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
+          Revenue and service charge (shown separately), broken down by station, for the Ethiopian-calendar month that just ended — set Frequency to &ldquo;Monthly (Ethiopian calendar)&rdquo; below so it fires automatically on the 1st of each Ethiopian month. Sent as plain Telegram text, no file attachment.
         </div>
       )}
 

@@ -754,6 +754,7 @@ enum TelegramReportType {
   DAILY_SALES_SUMMARY
   DAILY_DEPOSITS_SUMMARY
   DAILY_SERVICE_CHARGE_BREAKDOWN
+  MONTHLY_SALES_SUMMARY
   CUSTOM
 }
 
@@ -768,12 +769,13 @@ enum TelegramMessageStatus {
 }
 
 enum TelegramFrequency {
-  DAILY         // every day
-  EVERY_N_DAYS  // every `intervalDays` days, counted from `anchorDate`
-  WEEKLY        // every week on `weekday`
-  MONTHLY       // every month on `dayOfMonth` (clamped to that month's length)
-  QUARTERLY     // every Jan/Apr/Jul/Oct on `dayOfMonth`
-  YEARLY        // every year on `monthOfYear`/`dayOfMonth`
+  DAILY             // every day
+  EVERY_N_DAYS      // every `intervalDays` days, counted from `anchorDate`
+  WEEKLY            // every week on `weekday`
+  MONTHLY           // every (Gregorian) month on `dayOfMonth` (clamped to that month's length)
+  QUARTERLY         // every Jan/Apr/Jul/Oct on `dayOfMonth`
+  YEARLY            // every year on `monthOfYear`/`dayOfMonth`
+  ETHIOPIAN_MONTHLY // every Ethiopian-calendar month, on its 1st day (a moving Gregorian date) — no extra fields needed, like DAILY
 }
 
 model TelegramRecipient {

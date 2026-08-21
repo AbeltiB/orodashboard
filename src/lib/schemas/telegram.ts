@@ -1,9 +1,9 @@
 // src/lib/schemas/telegram.ts
 import { z } from "zod";
 
-export const TELEGRAM_REPORT_TYPE_VALUES = ["DAILY_SALES_SUMMARY", "DAILY_DEPOSITS_SUMMARY", "DAILY_SERVICE_CHARGE_BREAKDOWN", "CUSTOM"] as const;
+export const TELEGRAM_REPORT_TYPE_VALUES = ["DAILY_SALES_SUMMARY", "DAILY_DEPOSITS_SUMMARY", "DAILY_SERVICE_CHARGE_BREAKDOWN", "MONTHLY_SALES_SUMMARY", "CUSTOM"] as const;
 export const TELEGRAM_REPORT_FOR_VALUES = ["TODAY", "YESTERDAY"] as const;
-export const TELEGRAM_FREQUENCY_VALUES = ["DAILY", "EVERY_N_DAYS", "WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"] as const;
+export const TELEGRAM_FREQUENCY_VALUES = ["DAILY", "EVERY_N_DAYS", "WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY", "ETHIOPIAN_MONTHLY"] as const;
 
 export const createRecipientSchema = z.object({
   label: z.string().min(1).max(100),
@@ -55,6 +55,7 @@ function checkFrequencyFields(data: {
       if (!data.monthOfYear) ctx.addIssue({ code: "custom", path: ["monthOfYear"], message: "Pick a month." });
       break;
     case "DAILY":
+    case "ETHIOPIAN_MONTHLY":
       break;
   }
 }
