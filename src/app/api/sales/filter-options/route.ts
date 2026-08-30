@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api-auth";
 import { ok, serverError } from "@/lib/api-utils";
+import { getCanonicalDepartureTerminals } from "@/lib/telegram/reports";
 
 /**
  * GET /api/sales/filter-options
@@ -14,12 +15,16 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const [departures, arrivals, employees, companies, associations, fleetCategories, levels] = await Promise.all([
+    const [departures, canonicalTerminals, arrivals, employees, companies, associations, fleetCategories, levels] = await Promise.all([
       prisma.salesTrip.findMany({
         distinct: ["departureTerminalName"],
         select: { departureTerminalName: true },
         orderBy: { departureTerminalName: "asc" },
       }),
+      // All 16 of our OTA-registered departure terminals — unioned in below
+      // so a terminal with zero sales_trips history so far (a new one, or a
+      // quiet day) is still selectable, not just ones that already have rows.
+      getCanonicalDepartureTerminals(),
       prisma.salesTrip.findMany({
         distinct: ["arrivalTerminalName"],
         select: { arrivalTerminalName: true },
@@ -55,8 +60,12 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
+    const departureTerminals = [...new Set([...departures.map((d) => d.departureTerminalName), ...canonicalTerminals])]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
     return ok({
-      departureTerminals: departures.map((d) => d.departureTerminalName).filter(Boolean),
+      departureTerminals,
       arrivalTerminals: arrivals.map((a) => a.arrivalTerminalName).filter(Boolean),
       employees: employees
         .filter((e) => e.employeeExternalId)

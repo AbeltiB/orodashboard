@@ -113,14 +113,13 @@ export async function runSchedule(scheduleId: string): Promise<{ sent: number; f
   if (!schedule) throw new Error("Schedule not found.");
   const reportType = schedule.reportType;
   const messageTemplate = schedule.messageTemplate;
+  const includeDetailedFile = schedule.includeDetailedFile;
 
   // Resolved once so the text recap and the attached workbook always agree
   // on exactly which calendar day they cover, even right at a midnight
   // boundary between the two being built.
   const date = resolveReportDate(schedule.reportFor);
   const config = telegramConfigFromEnv();
-
-  const file = schedule.includeDetailedFile ? await buildDetailedWorkbook(schedule.reportType, date) : null;
 
   const linkedRecipients = schedule.recipients
     .map((r) => r.recipient)
@@ -141,6 +140,24 @@ export async function runSchedule(scheduleId: string): Promise<{ sent: number; f
         ? buildStationServiceChargeReport(date, recipient.stationId!, recipient.station!.name)
         : buildReportContent({ reportType, messageTemplate }, date);
       contentCache.set(scopeKey, cached);
+    }
+    return cached;
+  }
+
+  // Same per-scope caching for the attached file (Excel for most report
+  // types, PDF for DAILY_SERVICE_CHARGE_BREAKDOWN) — critical for the
+  // scoped case: a station-scoped recipient must get a file containing only
+  // their own station, never the full company-wide one.
+  type DetailedFile = { buffer: Buffer; filename: string; mimeType: string } | null;
+  const fileCache = new Map<string, Promise<DetailedFile>>();
+  function fileFor(recipient: (typeof linkedRecipients)[number]): Promise<DetailedFile> {
+    if (!includeDetailedFile) return Promise.resolve(null);
+    const scoped = reportType === "DAILY_SERVICE_CHARGE_BREAKDOWN" && recipient.stationId && recipient.station;
+    const scopeKey = scoped ? `station:${recipient.stationId}` : "full";
+    let cached = fileCache.get(scopeKey);
+    if (!cached) {
+      cached = buildDetailedWorkbook(reportType, date, scoped ? { stationId: recipient.stationId!, stationName: recipient.station!.name } : undefined);
+      fileCache.set(scopeKey, cached);
     }
     return cached;
   }
@@ -177,9 +194,10 @@ export async function runSchedule(scheduleId: string): Promise<{ sent: number; f
       }
     }
 
+    const file = await fileFor(recipient);
     if (file) {
       try {
-        await sendTelegramDocument(config, recipient.telegramChatId!, file.buffer, file.filename);
+        await sendTelegramDocument(config, recipient.telegramChatId!, file.buffer, file.filename, file.mimeType);
         await prisma.telegramMessageLog.create({
           data: { scheduleId: schedule.id, recipientId: recipient.id, reportType: schedule.reportType, content: `[Attached: ${file.filename}]`, status: "SENT" },
         });

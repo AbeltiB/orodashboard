@@ -65,16 +65,13 @@ export async function sendTelegramDocument(
   chatId: string,
   buffer: Buffer,
   filename: string,
+  mimeType: string = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   caption?: string
 ): Promise<void> {
   const form = new FormData();
   form.set("chat_id", chatId);
   if (caption) form.set("caption", caption);
-  form.set(
-    "document",
-    new Blob([new Uint8Array(buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-    filename
-  );
+  form.set("document", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
 
   const res = await fetch(`https://api.telegram.org/bot${config.botToken}/sendDocument`, {
     method: "POST",

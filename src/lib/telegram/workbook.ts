@@ -7,8 +7,13 @@
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/api-utils";
-import { resolvePreviousEthiopianMonthRange } from "./reports";
+import { resolvePreviousEthiopianMonthRange, buildServiceChargeData, mergeStationBuckets } from "./reports";
+import { buildDailyFinancialPdf, buildStationFinancialPdf } from "./pdf";
+import { getStationMatchNames } from "@/lib/cashier-sales-scope";
 import type { $Enums } from "@/generated/prisma/client";
+
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const PDF_MIME = "application/pdf";
 
 function dayRange(date: Date): { from: Date; to: Date } {
   const from = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
@@ -244,21 +249,22 @@ async function buildDepositsWorkbook(date: Date): Promise<ExcelJS.Workbook> {
 
 export async function buildDetailedWorkbook(
   reportType: $Enums.TelegramReportType,
-  date: Date
-): Promise<{ buffer: Buffer; filename: string } | null> {
+  date: Date,
+  scope?: { stationId: string; stationName: string }
+): Promise<{ buffer: Buffer; filename: string; mimeType: string } | null> {
   const dateKey = date.toISOString().slice(0, 10);
 
   if (reportType === "DAILY_SALES_SUMMARY") {
     const { from, to } = dayRange(date);
     const workbook = await buildSalesWorkbook(from, to, "Daily Sales — full detail", fmtDateLabel(date));
     const arrayBuffer = await workbook.xlsx.writeBuffer();
-    return { buffer: Buffer.from(arrayBuffer), filename: `sales-detail-${dateKey}.xlsx` };
+    return { buffer: Buffer.from(arrayBuffer), filename: `sales-detail-${dateKey}.xlsx`, mimeType: XLSX_MIME };
   }
 
   if (reportType === "DAILY_DEPOSITS_SUMMARY") {
     const workbook = await buildDepositsWorkbook(date);
     const arrayBuffer = await workbook.xlsx.writeBuffer();
-    return { buffer: Buffer.from(arrayBuffer), filename: `deposits-detail-${dateKey}.xlsx` };
+    return { buffer: Buffer.from(arrayBuffer), filename: `deposits-detail-${dateKey}.xlsx`, mimeType: XLSX_MIME };
   }
 
   if (reportType === "MONTHLY_SALES_SUMMARY") {
@@ -269,7 +275,26 @@ export async function buildDetailedWorkbook(
     const workbook = await buildSalesWorkbook(from, to, "Monthly Sales — full detail", `${label} (${gregorianRange})`);
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     const fileLabel = label.replace(/\s+/g, "-");
-    return { buffer: Buffer.from(arrayBuffer), filename: `sales-detail-${fileLabel}.xlsx` };
+    return { buffer: Buffer.from(arrayBuffer), filename: `sales-detail-${fileLabel}.xlsx`, mimeType: XLSX_MIME };
+  }
+
+  if (reportType === "DAILY_SERVICE_CHARGE_BREAKDOWN") {
+    // PDF, not Excel — the daily financial report's attachment. Scoped the
+    // same way the text message is: a station-scoped recipient gets a PDF
+    // containing only their own station, built from the same underlying
+    // data as the full company-wide one so the two never disagree.
+    const { stations, grandRevenue, grandServiceCharge } = await buildServiceChargeData(date);
+
+    if (scope) {
+      const matchNames = await getStationMatchNames(scope.stationId);
+      const merged = mergeStationBuckets(matchNames, stations);
+      const buffer = await buildStationFinancialPdf(date, scope.stationName, merged);
+      const fileLabel = scope.stationName.replace(/\s+/g, "-");
+      return { buffer, filename: `financial-report-${fileLabel}-${dateKey}.pdf`, mimeType: PDF_MIME };
+    }
+
+    const buffer = await buildDailyFinancialPdf(date, stations, grandRevenue, grandServiceCharge);
+    return { buffer, filename: `financial-report-${dateKey}.pdf`, mimeType: PDF_MIME };
   }
 
   return null;

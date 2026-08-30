@@ -45,12 +45,25 @@ function dayRange(date: Date): { from: Date; to: Date } {
   return { from, to };
 }
 
-function fmtDateLabel(date: Date): string {
+export function fmtDateLabel(date: Date): string {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(date);
 }
 
-function fmtETB(n: number): string {
+export function fmtETB(n: number): string {
   return new Intl.NumberFormat("en-ET", { maximumFractionDigits: 2 }).format(n) + " ETB";
+}
+
+// The company's own 16 OTA-registered departure terminals — the canonical
+// "all routes" list every report backfills against, so a terminal with zero
+// activity in a given period still shows up (at zero) instead of silently
+// vanishing from the report the way a plain groupBy-over-SalesTrip would.
+export async function getCanonicalDepartureTerminals(): Promise<string[]> {
+  const rows = await prisma.otaCompanyRoute.findMany({
+    select: { departureTerminalName: true },
+    distinct: ["departureTerminalId"],
+    orderBy: { departureTerminalName: "asc" },
+  });
+  return rows.map((r) => r.departureTerminalName);
 }
 
 // Telegram's sendMessage caps text at 4096 characters. A per-station or
@@ -78,29 +91,29 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
   const { from, to } = dayRange(date);
   const label = fmtDateLabel(date);
 
-  const [aggregate, byTerminal] = await Promise.all([
+  const [aggregate, byTerminal, canonicalTerminals] = await Promise.all([
     prisma.salesTrip.aggregate({
       where: { date: { gte: from, lt: to } },
       _sum: { totalServiceCharge: true, passengers: true },
       _count: { _all: true },
     }),
-    // Every departure station that had trips this day — no cap, so this
-    // always covers all of them (currently 9) and keeps covering all of
-    // them automatically as more stations get added later.
     prisma.salesTrip.groupBy({
       by: ["departureTerminalName"],
       where: { date: { gte: from, lt: to } },
       _sum: { totalServiceCharge: true },
-      orderBy: { _sum: { totalServiceCharge: "desc" } },
     }),
+    getCanonicalDepartureTerminals(),
   ]);
 
   const totalRevenue = toNumber(aggregate._sum.totalServiceCharge ?? 0);
   const totalPassengers = aggregate._sum.passengers ?? 0;
   const totalTrips = aggregate._count._all;
 
-  if (totalTrips === 0) {
-    return `<b>Daily Sales Summary — ${label}</b>\n\nNo trips recorded for this day.`;
+  // Every one of the 16 departure terminals always appears, at zero if it
+  // had no activity — instead of silently dropping out of the list.
+  const amountByStation = new Map(byTerminal.map((t) => [t.departureTerminalName, toNumber(t._sum.totalServiceCharge ?? 0)]));
+  for (const name of canonicalTerminals) {
+    if (!amountByStation.has(name)) amountByStation.set(name, 0);
   }
 
   const header = [
@@ -110,9 +123,10 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
     `Passengers: <b>${totalPassengers.toLocaleString()}</b>`,
     `Total revenue: <b>${fmtETB(totalRevenue)}</b>`,
     ``,
-    `By departure station (${byTerminal.length}):`,
+    `By departure station (${amountByStation.size}):`,
   ];
-  const stationLines = byTerminal.map((t, i) => `${i + 1}. ${t.departureTerminalName} — ${fmtETB(toNumber(t._sum.totalServiceCharge ?? 0))}`);
+  const sortedStations = [...amountByStation.entries()].sort((a, b) => b[1] - a[1]);
+  const stationLines = sortedStations.map(([name, amount], i) => `${i + 1}. ${name} — ${fmtETB(amount)}`);
   const shown = capLines(
     header.join("\n").length,
     stationLines,
@@ -171,14 +185,55 @@ function fmtAddisTime(instant: Date): string {
   return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: ADDIS_TZ }).format(instant);
 }
 
-// station -> ticketer -> route -> service-charge amount, plus running totals
-// at every level — the shape the daily service-charge breakdown report
-// walks to render its per-station blocks. Reused as-is for the single-
-// station variant too (just one entry, built directly rather than grouped
-// out of a multi-station map).
-type RouteAmounts = Map<string, number>;
-type TicketerBucket = { name: string; routes: RouteAmounts; total: number };
-type StationBucket = { ticketers: Map<string, TicketerBucket>; total: number };
+// station -> route (arrival terminal) -> revenue/service-charge, with the
+// ticketer(s) who worked that route nested underneath — the shape the daily
+// financial report walks to render its per-station blocks (and what the PDF
+// attachment renders too, so the text message and the file always agree).
+export type RouteTicketer = { name: string; revenue: number; serviceCharge: number };
+export type RouteBucket = { revenue: number; serviceCharge: number; ticketers: Map<string, RouteTicketer> };
+export type StationBucket = { routes: Map<string, RouteBucket>; revenue: number; serviceCharge: number };
+
+function emptyStationBucket(): StationBucket {
+  return { routes: new Map(), revenue: 0, serviceCharge: 0 };
+}
+
+// Adds `route`'s figures into `target` under `arrival`, summing rather than
+// overwriting when the arrival already exists — used when merging several
+// departureTerminalName spellings that all resolve to the same Station.
+function mergeRouteInto(target: StationBucket, arrival: string, route: RouteBucket) {
+  const existing = target.routes.get(arrival);
+  if (!existing) {
+    target.routes.set(arrival, { revenue: route.revenue, serviceCharge: route.serviceCharge, ticketers: new Map(route.ticketers) });
+    return;
+  }
+  existing.revenue += route.revenue;
+  existing.serviceCharge += route.serviceCharge;
+  for (const [key, t] of route.ticketers) {
+    const et = existing.ticketers.get(key);
+    if (et) {
+      et.revenue += t.revenue;
+      et.serviceCharge += t.serviceCharge;
+    } else {
+      existing.ticketers.set(key, { ...t });
+    }
+  }
+}
+
+// Folds every departureTerminalName that matches one Station (there can be
+// more than one spelling in the raw sales_trips data) into a single bucket
+// for that station — used by the station-scoped text report and PDF so a
+// scoped recipient sees one clean total, not one block per spelling.
+export function mergeStationBuckets(names: string[], stations: Map<string, StationBucket>): StationBucket {
+  const merged = emptyStationBucket();
+  for (const name of names) {
+    const s = stations.get(name);
+    if (!s) continue;
+    merged.revenue += s.revenue;
+    merged.serviceCharge += s.serviceCharge;
+    for (const [arrival, route] of s.routes) mergeRouteInto(merged, arrival, route);
+  }
+  return merged;
+}
 
 // "Last successful sync was HH:MM" (or a staleness/missing-sync warning) —
 // shared by both the full and single-station service-charge reports.
@@ -209,14 +264,21 @@ async function buildSyncFreshnessNote(): Promise<string> {
 }
 
 function renderStationBlock(stationName: string, station: StationBucket): string {
-  const lines = [`🏢 <b>${stationName}</b> — ${fmtETB(station.total)}`];
-  const sortedTicketers = [...station.ticketers.values()].sort((a, b) => b.total - a.total);
-  for (const ticketer of sortedTicketers) {
-    lines.push(`  👤 ${ticketer.name} — <b>${fmtETB(ticketer.total)}</b>`);
-    const sortedRoutes = [...ticketer.routes.entries()].sort((a, b) => b[1] - a[1]);
-    for (const [route, amount] of sortedRoutes) {
-      lines.push(`      • ${route}: ${fmtETB(amount)}`);
-    }
+  const total = station.revenue + station.serviceCharge;
+  const lines = [`🏢 <b>${stationName}</b> — Rev: ${fmtETB(station.revenue)} · Svc: ${fmtETB(station.serviceCharge)} · Total: ${fmtETB(total)}`];
+
+  if (station.routes.size === 0) {
+    lines.push(`   <i>No activity today.</i>`);
+    return lines.join("\n");
+  }
+
+  const sortedRoutes = [...station.routes.entries()].sort((a, b) => (b[1].revenue + b[1].serviceCharge) - (a[1].revenue + a[1].serviceCharge));
+  for (const [arrival, route] of sortedRoutes) {
+    const routeTotal = route.revenue + route.serviceCharge;
+    lines.push(`  → <b>${arrival}</b> — Rev: ${fmtETB(route.revenue)} · Svc: ${fmtETB(route.serviceCharge)} · Total: ${fmtETB(routeTotal)}`);
+    const sortedTicketers = [...route.ticketers.values()].sort((a, b) => (b.revenue + b.serviceCharge) - (a.revenue + a.serviceCharge));
+    const workedBy = sortedTicketers.map((t) => `${t.name} (${fmtETB(t.revenue + t.serviceCharge)})`).join(", ");
+    lines.push(`      Worked by: ${workedBy}`);
   }
   return lines.join("\n");
 }
@@ -249,45 +311,85 @@ function packIntoMessages(prefix: string, blocks: string[], finalBlock: string):
   return messages.length > 1 ? messages.map((m, i) => `${m}\n\n(${i + 1}/${messages.length})`) : messages;
 }
 
-// Sent nightly (intended for 22:00 Addis time) as the "final for the day"
-// service-charge reconciliation across every station — station -> ticketer
-// -> route, with a subtotal at every level and a grand total at the end.
-export async function buildServiceChargeBreakdownReport(date: Date): Promise<string[]> {
+// Core data fetch shared by the full daily financial report (text + PDF)
+// and the single-station variant — one query, station -> route -> ticketer,
+// pre-seeded with all 16 canonical departure terminals (at zero) so a
+// terminal with no activity that day still shows up instead of vanishing.
+export async function buildServiceChargeData(
+  date: Date
+): Promise<{ stations: Map<string, StationBucket>; grandRevenue: number; grandServiceCharge: number }> {
   const { from, to } = dayRange(date);
-  const label = fmtDateLabel(date);
-  const syncNote = await buildSyncFreshnessNote();
 
-  const rows = await prisma.salesTrip.groupBy({
-    by: ["departureTerminalName", "employeeExternalId", "employeeName", "arrivalTerminalName"],
-    where: { date: { gte: from, lt: to }, employeeExternalId: { not: null } },
-    _sum: { totalServiceCharge: true },
-  });
-
-  const titleLine = `<b>Service Charge Breakdown — ${label}</b>`;
-  if (rows.length === 0) {
-    return [`${syncNote}${titleLine}\n\nNo trips recorded for this day.`];
-  }
+  const [rows, canonicalTerminals] = await Promise.all([
+    prisma.salesTrip.groupBy({
+      by: ["departureTerminalName", "arrivalTerminalName", "employeeExternalId", "employeeName"],
+      where: { date: { gte: from, lt: to }, employeeExternalId: { not: null } },
+      _sum: { tariff: true, totalServiceCharge: true },
+    }),
+    getCanonicalDepartureTerminals(),
+  ]);
 
   const stations = new Map<string, StationBucket>();
-  let grandTotal = 0;
+  for (const name of canonicalTerminals) stations.set(name, emptyStationBucket());
+
+  let grandRevenue = 0;
+  let grandServiceCharge = 0;
 
   for (const r of rows) {
-    const amount = toNumber(r._sum.totalServiceCharge ?? 0);
-    if (amount === 0) continue;
-    const station = stations.get(r.departureTerminalName) ?? { ticketers: new Map(), total: 0 };
+    const revenue = toNumber(r._sum.tariff ?? 0);
+    const serviceCharge = toNumber(r._sum.totalServiceCharge ?? 0);
+    if (revenue === 0 && serviceCharge === 0) continue;
+
+    const station = stations.get(r.departureTerminalName) ?? emptyStationBucket();
+    const route = station.routes.get(r.arrivalTerminalName) ?? { revenue: 0, serviceCharge: 0, ticketers: new Map<string, RouteTicketer>() };
     const ticketerKey = r.employeeExternalId as string;
-    const ticketer = station.ticketers.get(ticketerKey) ?? { name: r.employeeName ?? "Unknown", routes: new Map(), total: 0 };
-    ticketer.routes.set(r.arrivalTerminalName, (ticketer.routes.get(r.arrivalTerminalName) ?? 0) + amount);
-    ticketer.total += amount;
-    station.ticketers.set(ticketerKey, ticketer);
-    station.total += amount;
+    const ticketer = route.ticketers.get(ticketerKey) ?? { name: r.employeeName ?? "Unknown", revenue: 0, serviceCharge: 0 };
+
+    ticketer.revenue += revenue;
+    ticketer.serviceCharge += serviceCharge;
+    route.ticketers.set(ticketerKey, ticketer);
+    route.revenue += revenue;
+    route.serviceCharge += serviceCharge;
+    station.routes.set(r.arrivalTerminalName, route);
+    station.revenue += revenue;
+    station.serviceCharge += serviceCharge;
     stations.set(r.departureTerminalName, station);
-    grandTotal += amount;
+
+    grandRevenue += revenue;
+    grandServiceCharge += serviceCharge;
   }
 
-  const sortedStations = [...stations.entries()].sort((a, b) => b[1].total - a[1].total);
+  return { stations, grandRevenue, grandServiceCharge };
+}
+
+export function sortStationEntries(entries: [string, StationBucket][]): [string, StationBucket][] {
+  return [...entries].sort((a, b) => {
+    const totalA = a[1].revenue + a[1].serviceCharge;
+    const totalB = b[1].revenue + b[1].serviceCharge;
+    if (totalA === 0 && totalB === 0) return a[0].localeCompare(b[0]);
+    if (totalA === 0) return 1;
+    if (totalB === 0) return -1;
+    return totalB - totalA;
+  });
+}
+
+// Sent nightly (intended for 22:00 Addis time) as the full financial +
+// operational close-out for the day — every one of the 16 departure
+// terminals, each broken down route -> ticketer, with revenue and service
+// charge shown side by side and a grand total at the end. Terminals with no
+// activity still appear (via buildServiceChargeData's canonical backfill)
+// instead of silently dropping out of the report.
+export async function buildServiceChargeBreakdownReport(date: Date): Promise<string[]> {
+  const label = fmtDateLabel(date);
+  const syncNote = await buildSyncFreshnessNote();
+  const titleLine = `<b>Daily Financial Report — ${label}</b>`;
+
+  const { stations, grandRevenue, grandServiceCharge } = await buildServiceChargeData(date);
+  const grandTotal = grandRevenue + grandServiceCharge;
+
+  const sortedStations = sortStationEntries([...stations.entries()]);
   const stationBlocks = sortedStations.map(([stationName, station]) => renderStationBlock(stationName, station));
-  const grandTotalBlock = `<b>Grand total — ${label}: ${fmtETB(grandTotal)}</b>`;
+  const grandTotalBlock = `<b>Grand total — ${label}: Revenue ${fmtETB(grandRevenue)} · Service charge ${fmtETB(grandServiceCharge)} · Total ${fmtETB(grandTotal)}</b>`;
 
   return packIntoMessages(syncNote + titleLine, stationBlocks, grandTotalBlock);
 }
@@ -296,39 +398,17 @@ export async function buildServiceChargeBreakdownReport(date: Date): Promise<str
 // trips — for a recipient (e.g. a station cashier) who should only ever see
 // their own station's numbers, never anyone else's.
 export async function buildStationServiceChargeReport(date: Date, stationId: string, stationName: string): Promise<string[]> {
-  const { from, to } = dayRange(date);
   const label = fmtDateLabel(date);
   const syncNote = await buildSyncFreshnessNote();
-  const titleLine = `<b>${stationName} — Service Charge — ${label}</b>`;
+  const titleLine = `<b>${stationName} — Daily Financial Report — ${label}</b>`;
 
   const matchNames = await getStationMatchNames(stationId);
-  if (matchNames.length === 0) {
-    return [`${syncNote}${titleLine}\n\nNo trips recorded for this day.`];
-  }
+  const { stations } = await buildServiceChargeData(date);
+  const merged = mergeStationBuckets(matchNames, stations);
 
-  const rows = await prisma.salesTrip.groupBy({
-    by: ["employeeExternalId", "employeeName", "arrivalTerminalName"],
-    where: { date: { gte: from, lt: to }, employeeExternalId: { not: null }, departureTerminalName: { in: matchNames } },
-    _sum: { totalServiceCharge: true },
-  });
-  if (rows.length === 0) {
-    return [`${syncNote}${titleLine}\n\nNo trips recorded for this day.`];
-  }
-
-  const station: StationBucket = { ticketers: new Map(), total: 0 };
-  for (const r of rows) {
-    const amount = toNumber(r._sum.totalServiceCharge ?? 0);
-    if (amount === 0) continue;
-    const ticketerKey = r.employeeExternalId as string;
-    const ticketer = station.ticketers.get(ticketerKey) ?? { name: r.employeeName ?? "Unknown", routes: new Map(), total: 0 };
-    ticketer.routes.set(r.arrivalTerminalName, (ticketer.routes.get(r.arrivalTerminalName) ?? 0) + amount);
-    ticketer.total += amount;
-    station.ticketers.set(ticketerKey, ticketer);
-    station.total += amount;
-  }
-
-  const totalBlock = `<b>Total for ${stationName} — ${label}: ${fmtETB(station.total)}</b>`;
-  return packIntoMessages(syncNote + titleLine, [renderStationBlock(stationName, station)], totalBlock);
+  const total = merged.revenue + merged.serviceCharge;
+  const totalBlock = `<b>Total for ${stationName} — ${label}: Revenue ${fmtETB(merged.revenue)} · Service charge ${fmtETB(merged.serviceCharge)} · Total ${fmtETB(total)}</b>`;
+  return packIntoMessages(syncNote + titleLine, [renderStationBlock(stationName, merged)], totalBlock);
 }
 
 // The Gregorian [from, to) range for the Ethiopian-calendar month just
@@ -362,7 +442,7 @@ export async function buildMonthlySalesReport(now: Date = new Date()): Promise<s
   const syncNote = await buildSyncFreshnessNote();
   const titleLine = `<b>Monthly Sales Summary — ${label}</b>\n<i>${gregorianRange}</i>`;
 
-  const [aggregate, byStation] = await Promise.all([
+  const [aggregate, byStation, canonicalTerminals] = await Promise.all([
     prisma.salesTrip.aggregate({
       where: { date: { gte: from, lt: to } },
       _sum: { tariff: true, totalServiceCharge: true, passengers: true },
@@ -374,6 +454,7 @@ export async function buildMonthlySalesReport(now: Date = new Date()): Promise<s
       _sum: { tariff: true, totalServiceCharge: true, passengers: true },
       _count: { _all: true },
     }),
+    getCanonicalDepartureTerminals(),
   ]);
 
   if (aggregate._count._all === 0) {
@@ -384,6 +465,18 @@ export async function buildMonthlySalesReport(now: Date = new Date()): Promise<s
   const totalServiceCharge = toNumber(aggregate._sum.totalServiceCharge ?? 0);
   const totalCollected = totalRevenue + totalServiceCharge;
 
+  // Every one of the 16 departure terminals always appears, even with zero
+  // trips this month, instead of dropping out of the by-station list.
+  const statMap = new Map(
+    byStation.map((s) => [
+      s.departureTerminalName,
+      { name: s.departureTerminalName, trips: s._count._all, revenue: toNumber(s._sum.tariff ?? 0), svc: toNumber(s._sum.totalServiceCharge ?? 0) },
+    ])
+  );
+  for (const name of canonicalTerminals) {
+    if (!statMap.has(name)) statMap.set(name, { name, trips: 0, revenue: 0, svc: 0 });
+  }
+
   const header = [
     syncNote + titleLine,
     ``,
@@ -393,20 +486,23 @@ export async function buildMonthlySalesReport(now: Date = new Date()): Promise<s
     `Service charge: <b>${fmtETB(totalServiceCharge)}</b>`,
     `Total collected: <b>${fmtETB(totalCollected)}</b>`,
     ``,
-    `By station (${byStation.length}):`,
+    `By station (${statMap.size}):`,
   ].join("\n");
 
-  const sortedStations = [...byStation].sort((a, b) => {
-    const totalA = toNumber(a._sum.tariff ?? 0) + toNumber(a._sum.totalServiceCharge ?? 0);
-    const totalB = toNumber(b._sum.tariff ?? 0) + toNumber(b._sum.totalServiceCharge ?? 0);
+  const sortedStations = [...statMap.values()].sort((a, b) => {
+    const totalA = a.revenue + a.svc;
+    const totalB = b.revenue + b.svc;
+    if (totalA === 0 && totalB === 0) return a.name.localeCompare(b.name);
+    if (totalA === 0) return 1;
+    if (totalB === 0) return -1;
     return totalB - totalA;
   });
 
-  const stationBlocks = sortedStations.map((s) => {
-    const revenue = toNumber(s._sum.tariff ?? 0);
-    const svc = toNumber(s._sum.totalServiceCharge ?? 0);
-    return `🏢 <b>${s.departureTerminalName}</b> — ${s._count._all.toLocaleString()} trips\n   Revenue: ${fmtETB(revenue)} · Service charge: ${fmtETB(svc)} · Total: ${fmtETB(revenue + svc)}`;
-  });
+  const stationBlocks = sortedStations.map((s) =>
+    s.trips > 0
+      ? `🏢 <b>${s.name}</b> — ${s.trips.toLocaleString()} trips\n   Revenue: ${fmtETB(s.revenue)} · Service charge: ${fmtETB(s.svc)} · Total: ${fmtETB(s.revenue + s.svc)}`
+      : `🏢 <b>${s.name}</b> — <i>No activity this month.</i>`
+  );
 
   const grandTotalBlock = `<b>Grand total — ${label}: ${fmtETB(totalCollected)}</b>`;
   return packIntoMessages(header, stationBlocks, grandTotalBlock);
