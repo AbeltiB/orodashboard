@@ -7,6 +7,7 @@ import {
   Eye, EyeOff, ChevronsUpDown, Calendar, Banknote,
   Loader2, Users, Shield, CreditCard,
 } from "lucide-react";
+import StationEmployeeDiagram from "@/components/ota/StationEmployeeDiagram";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,27 @@ type PettyCashEntry = {
 
 type StationOption = { id: string; name: string; code: string };
 type PosOption = { id: string; serial: string; code: string; make: string; model: string; stationId?: string | null };
+
+type EmployeeAnalytics = {
+  headcount: { total: number; byRole: Record<string, number>; byStation: { stationId: string; stationName: string; count: number }[]; unassigned: number };
+  tenure: { under1y: number; from1to3y: number; over3y: number; unknown: number };
+  posCoverage: { assigned: number; unassigned: number };
+  dataQuality: {
+    notInOta: { id: string; fullName: string; role: string }[];
+    otaOnlyNotInternal: { userId: string; fullName: string; terminalName: string | null; isActive: boolean }[];
+  };
+  stationNetwork: { id: string; name: string; isOperational: boolean; employees: { id: string; fullName: string; role: string }[] }[];
+};
+
+type OtaMatch = {
+  id: string; userId: string; fullName: string; position: string | null; department: string | null;
+  joiningDate: string | null; terminalName: string | null; roleName: string | null; userStatus: string | null; isActive: boolean;
+};
+type SalesPerformance = {
+  trips: number; passengers: number; revenue: number; totalServiceCharge: number; totalCollected: number;
+  firstTripDate: string | null; lastTripDate: string | null; lastStation: string | null;
+};
+type EmployeeEnrichment = { otaMatch: OtaMatch | null; salesPerformance: SalesPerformance | null };
 
 type Employee = {
   id: string;
@@ -522,7 +544,7 @@ function PettyCashTab({ emp, onReload }: { emp: Employee; onReload: () => void }
 
 // ─── Detail panel ─────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "station" | "pos" | "pettycash";
+type Tab = "overview" | "station" | "pos" | "pettycash" | "sales";
 
 function DetailPanel({ emp, onEdit, onDelete, onReload }: {
   emp: Employee;
@@ -532,8 +554,25 @@ function DetailPanel({ emp, onEdit, onDelete, onReload }: {
 }) {
   const [tab, setTab]   = useState<Tab>("overview");
   const [showPwd, setShowPwd] = useState(false);
+  const [enrichment, setEnrichment] = useState<EmployeeEnrichment | null>(null);
+  const [enrichmentLoading, setEnrichmentLoading] = useState(false);
+  const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
   const rc = roleColor(emp.role);
   const fullName = [emp.firstName, emp.middleName, emp.lastName].filter(Boolean).join(" ");
+
+  useEffect(() => {
+    setEnrichment(null);
+    setEnrichmentError(null);
+  }, [emp.id]);
+
+  useEffect(() => {
+    if (tab !== "sales" || enrichment || enrichmentLoading) return;
+    setEnrichmentLoading(true);
+    apiFetch<EmployeeEnrichment>(`/api/employees/${emp.id}/enrichment`)
+      .then(setEnrichment)
+      .catch((e) => setEnrichmentError(e instanceof Error ? e.message : "Failed to load."))
+      .finally(() => setEnrichmentLoading(false));
+  }, [tab, emp.id, enrichment, enrichmentLoading]);
 
   function TabBtn({ id, label }: { id: Tab; label: string }) {
     const active = tab === id;
@@ -600,6 +639,7 @@ function DetailPanel({ emp, onEdit, onDelete, onReload }: {
           <TabBtn id="overview"  label="Overview" />
           <TabBtn id="station"   label="Station & POS" />
           <TabBtn id="pettycash" label="Petty Cash" />
+          <TabBtn id="sales"     label="Sales & OTA" />
         </div>
       </div>
 
@@ -680,6 +720,70 @@ function DetailPanel({ emp, onEdit, onDelete, onReload }: {
         {tab === "pettycash" && (
           <PettyCashTab emp={emp} onReload={onReload} />
         )}
+
+        {/* ── Sales & OTA ── */}
+        {tab === "sales" && (
+          <div>
+            {enrichmentLoading && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted-foreground)", fontSize: 13, padding: "20px 0" }}>
+                <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Matching against OTA…
+              </div>
+            )}
+            {enrichmentError && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#b91c1c", background: "#fee2e2", borderRadius: 9, padding: "10px 12px", fontSize: 13 }}>
+                <AlertCircle size={14} /> {enrichmentError}
+              </div>
+            )}
+            {enrichment && !enrichment.otaMatch && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, color: "#92400e", background: "#fef3c7", borderRadius: 9, padding: "12px 14px", fontSize: 13, lineHeight: 1.5 }}>
+                <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                No matching OTA registration found for this phone number — this employee either isn&apos;t registered as a ticketer with OTA, or their phone number differs between the two systems.
+              </div>
+            )}
+            {enrichment?.otaMatch && (
+              <>
+                <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", marginBottom: 8 }}>OTA registration (matched by phone)</p>
+                <InfoRow label="OTA full name"     value={enrichment.otaMatch.fullName} />
+                <InfoRow label="Position"          value={enrichment.otaMatch.position || "—"} />
+                <InfoRow label="Department"        value={enrichment.otaMatch.department || "—"} />
+                <InfoRow label="OTA role"          value={enrichment.otaMatch.roleName || "—"} />
+                <InfoRow label="Terminal"          value={enrichment.otaMatch.terminalName || "—"} />
+                <InfoRow label="Joining date (OTA)" value={enrichment.otaMatch.joiningDate ? enrichment.otaMatch.joiningDate.slice(0, 10) : "—"} />
+                <InfoRow label="OTA status"        value={enrichment.otaMatch.userStatus || (enrichment.otaMatch.isActive ? "active" : "inactive")} />
+                {!emp.employmentDate && enrichment.otaMatch.joiningDate && (
+                  <p style={{ fontSize: 12, color: "#d97706", marginTop: 8 }}>
+                    Employment date is missing on this record — OTA has {enrichment.otaMatch.joiningDate.slice(0, 10)} on file. Consider filling it in via Edit.
+                  </p>
+                )}
+
+                <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted-foreground)", marginBottom: 8, marginTop: 20 }}>Sales performance</p>
+                {enrichment.salesPerformance ? (
+                  <>
+                    <div className="grid-3" style={{ gap: 10, marginBottom: 14 }}>
+                      {[
+                        { label: "Trips", value: enrichment.salesPerformance.trips.toLocaleString() },
+                        { label: "Revenue", value: fmtCurrency(enrichment.salesPerformance.revenue) },
+                        { label: "Service charge", value: fmtCurrency(enrichment.salesPerformance.totalServiceCharge) },
+                      ].map((s) => (
+                        <div key={s.label} style={{ background: "var(--background)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+                          <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginBottom: 4 }}>{s.label}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{s.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <InfoRow label="Total collected"    value={fmtCurrency(enrichment.salesPerformance.totalCollected)} />
+                    <InfoRow label="Passengers carried" value={enrichment.salesPerformance.passengers.toLocaleString()} />
+                    <InfoRow label="First trip on file" value={enrichment.salesPerformance.firstTripDate ? enrichment.salesPerformance.firstTripDate.slice(0, 10) : "—"} />
+                    <InfoRow label="Last trip on file"  value={enrichment.salesPerformance.lastTripDate ? enrichment.salesPerformance.lastTripDate.slice(0, 10) : "—"} />
+                    <InfoRow label="Last station"       value={enrichment.salesPerformance.lastStation || "—"} />
+                  </>
+                ) : (
+                  <p style={{ fontSize: 13, color: "var(--muted-foreground)" }}>No trip activity recorded for this person yet.</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -699,12 +803,26 @@ export default function EmployeesPage() {
   const [filterStation, setFilterStation] = useState<string>("All");
   const [modal, setModal]         = useState<"create" | "edit" | "delete" | null>(null);
   const [toast, setToast]         = useState<string | null>(null);
+  const [analytics, setAnalytics] = useState<EmployeeAnalytics | null>(null);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [selectedNetworkStation, setSelectedNetworkStation] = useState<string | null>(null);
 
   const loadEmployees = useCallback(async () => {
     try {
       const res = await apiFetch<{ data: Employee[] }>("/api/employees");
       setEmployees(res.data);
     } catch (e) { console.error(e); }
+  }, []);
+
+  const loadAnalytics = useCallback(async () => {
+    try {
+      const res = await apiFetch<EmployeeAnalytics>("/api/employees/analytics");
+      setAnalytics(res);
+      setAnalyticsError(null);
+      setSelectedNetworkStation((prev) => prev ?? [...res.stationNetwork].sort((a, b) => b.employees.length - a.employees.length)[0]?.id ?? null);
+    } catch (e) {
+      setAnalyticsError(e instanceof Error ? e.message : "Failed to load analytics.");
+    }
   }, []);
 
   const loadStations = useCallback(async () => {
@@ -734,11 +852,11 @@ export default function EmployeesPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([loadEmployees(), loadStations(), loadPosMachines()]).finally(() => {
+    Promise.all([loadEmployees(), loadStations(), loadPosMachines(), loadAnalytics()]).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [loadEmployees, loadStations, loadPosMachines]);
+  }, [loadEmployees, loadStations, loadPosMachines, loadAnalytics]);
 
   useEffect(() => {
     if (selected) loadActiveDetail(selected);
@@ -754,7 +872,7 @@ export default function EmployeesPage() {
   }), [employees, search, filterRole, filterStation]);
 
   async function handleSaved() {
-    await loadEmployees();
+    await Promise.all([loadEmployees(), loadAnalytics()]);
     if (selected) await loadActiveDetail(selected);
     setToast(modal === "create" ? "Employee created" : "Employee updated");
     setModal(null);
@@ -764,7 +882,7 @@ export default function EmployeesPage() {
     if (!activeDetail) return;
     try {
       await apiFetch(`/api/employees/${activeDetail.id}`, { method: "DELETE" });
-      await loadEmployees();
+      await Promise.all([loadEmployees(), loadAnalytics()]);
       setSelected(null);
       setActiveDetail(null);
       setToast("Employee removed");
@@ -790,6 +908,7 @@ export default function EmployeesPage() {
       {modal === "edit"   && active && <EmployeeFormModal initial={active} stations={stations} posMachines={posMachines} onSaved={handleSaved} onClose={() => setModal(null)} />}
       {modal === "delete" && active && <DeleteModal name={active.fullName} onConfirm={handleDelete} onClose={() => setModal(null)} />}
 
+      <div style={{ minHeight: "100vh", background: "var(--background)", overflowY: "auto" }}>
       <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--background)", overflow: "hidden" }}>
 
         {/* Top bar */}
@@ -911,6 +1030,137 @@ export default function EmployeesPage() {
             }
           </div>
         </div>
+      </div>
+
+      {/* ── Analytics & data quality ── */}
+      <div style={{ padding: "28px 28px 0" }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Roster analytics</h2>
+        <p style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "0 0 16px" }}>
+          Headcount, tenure, POS coverage, and gaps between your HR records and OTA&apos;s own registry.
+        </p>
+
+        {analyticsError && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#fee2e2", borderRadius: 9, color: "#b91c1c", fontSize: 13, marginBottom: 16 }}>
+            <AlertCircle size={14} /> {analyticsError}
+          </div>
+        )}
+
+        {analytics && (
+          <>
+            <div className="grid-4" style={{ gap: 12, marginBottom: 20 }}>
+              {[
+                { label: "Under 1 year", value: analytics.tenure.under1y, icon: <Calendar size={16} />, color: "#2563eb", bg: "#dbeafe" },
+                { label: "1–3 years", value: analytics.tenure.from1to3y, icon: <Calendar size={16} />, color: "#16a34a", bg: "#dcfce7" },
+                { label: "Over 3 years", value: analytics.tenure.over3y, icon: <Calendar size={16} />, color: "#7c3aed", bg: "#ede9fe" },
+                { label: "With a POS machine", value: `${analytics.posCoverage.assigned}/${analytics.posCoverage.assigned + analytics.posCoverage.unassigned}`, icon: <Monitor size={16} />, color: "#d97706", bg: "#fef3c7" },
+              ].map((c) => (
+                <div key={c.label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 9, background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{c.icon}</div>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "var(--foreground)", lineHeight: 1, fontFamily: "monospace" }}>{c.value}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{c.label}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+              {/* By station */}
+              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 16 }}>
+                <h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", margin: "0 0 12px" }}>Headcount by station</h3>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {analytics.headcount.byStation.map((s) => (
+                    <div key={s.stationId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+                      <span style={{ color: "var(--foreground)" }}>{s.stationName}</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--foreground)" }}>{s.count}</span>
+                    </div>
+                  ))}
+                  {analytics.headcount.unassigned > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "var(--muted-foreground)" }}>
+                      <span>No station assigned</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{analytics.headcount.unassigned}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Data quality gaps */}
+              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 16 }}>
+                <h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Data-quality gaps</h3>
+                <p style={{ fontSize: 11.5, color: "var(--muted-foreground)", margin: "0 0 12px" }}>Matched to OTA by phone number.</p>
+                <div style={{ display: "flex", gap: 16, marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#d97706", fontFamily: "monospace" }}>{analytics.dataQuality.notInOta.length}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>HR employees not found in OTA</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: "#d97706", fontFamily: "monospace" }}>{analytics.dataQuality.otaOnlyNotInternal.length}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>In OTA but no HR record</div>
+                  </div>
+                </div>
+                {analytics.dataQuality.otaOnlyNotInternal.length > 0 && (
+                  <div style={{ maxHeight: 140, overflowY: "auto", borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                    {analytics.dataQuality.otaOnlyNotInternal.map((o) => (
+                      <div key={o.userId} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", color: "var(--foreground)" }}>
+                        <span>{o.fullName}</span>
+                        <span style={{ color: "var(--muted-foreground)" }}>{o.terminalName ?? "—"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Station ↔ employee network ── */}
+      {analytics && (
+        <div style={{ padding: "0 28px 32px" }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px" }}>Station ↔ employee network</h2>
+          <p style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "0 0 16px" }}>
+            Every one of your 16 OTA-assigned departure terminals, with who&apos;s staffed there.
+          </p>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+            {analytics.stationNetwork.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSelectedNetworkStation(s.id)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 999,
+                  border: "1.5px solid", borderColor: selectedNetworkStation === s.id ? "var(--primary)" : "var(--border)",
+                  background: selectedNetworkStation === s.id ? "var(--primary)" : "var(--surface)",
+                  color: selectedNetworkStation === s.id ? "#fff" : "var(--foreground)",
+                  fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+                }}
+              >
+                {s.name}
+                <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.8 }}>{s.employees.length}</span>
+                {!s.isOperational && (
+                  <span title="Not yet set up as an operational station" style={{ width: 6, height: 6, borderRadius: "50%", background: selectedNetworkStation === s.id ? "#fff" : "#d97706" }} />
+                )}
+              </button>
+            ))}
+          </div>
+
+          {(() => {
+            const stationForDiagram = analytics.stationNetwork.find((s) => s.id === selectedNetworkStation) ?? analytics.stationNetwork[0] ?? null;
+            if (!stationForDiagram) return null;
+            return (
+              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, maxWidth: 620 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{stationForDiagram.name}</h3>
+                  {stationForDiagram.isOperational
+                    ? <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#dcfce7", color: "#16a34a" }}>Operational</span>
+                    : <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#fef3c7", color: "#d97706" }}>Not yet staffed</span>}
+                </div>
+                <StationEmployeeDiagram stationName={stationForDiagram.name} employees={stationForDiagram.employees} />
+              </div>
+            );
+          })()}
+        </div>
+      )}
       </div>
     </>
   );
