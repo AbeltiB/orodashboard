@@ -462,6 +462,54 @@ export async function fetchAllOtaVehicles(
   return { rows: allRows, pagesFetched: first.pages, sourceTotal: first.total };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANY PROFILE + ROUTE NETWORK — /api/companies/:id resolves the
+// company's own display name (used to pick "our" rows out of the nationwide
+// OtaTerminal.companyNames mirror); /api/terminals/:id/destinations lists
+// every registered route departing that one terminal, confirmed live to
+// already be scoped to just the requesting terminal's own registered routes
+// (cross-checked against /api/company-terminal-destinations for our company
+// — 28/28 Asallaa destinations matched, 0 outside it), so no separate
+// company-scoping filter is needed once the 16 terminal ids are known.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OtaCompanyProfile = { id: string; name: string };
+
+export async function fetchOtaCompanyProfile(config: OtaConfig, token: string, companyId: string): Promise<OtaCompanyProfile> {
+  const res = await fetch(`${config.baseUrl}/api/companies/${companyId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`OTA company profile fetch failed (HTTP ${res.status})`);
+  const body = (await res.json()) as { data?: { id: string; name: string } };
+  if (!body.data) throw new Error("OTA company profile response had no data.");
+  return { id: body.data.id, name: body.data.name };
+}
+
+export type OtaTerminalDestination = {
+  id: string;
+  departure_terminal_id: string;
+  arrival_terminal_id: string;
+  distance: string | null;
+  road_type?: string | null;
+  road_distances?: { gravel?: number; asphalt?: number } | null;
+  estimated_duration?: number | null;
+  status?: string | null;
+  departureTerminal?: { id: string; name: string } | null;
+  arrivalTerminal?: { id: string; name: string } | null;
+  [key: string]: unknown;
+};
+
+export async function fetchTerminalDestinations(config: OtaConfig, token: string, terminalId: string): Promise<OtaTerminalDestination[]> {
+  const res = await fetch(`${config.baseUrl}/api/terminals/${terminalId}/destinations`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`OTA terminal destinations for ${terminalId} failed (HTTP ${res.status})`);
+  const body = (await res.json()) as { data?: OtaTerminalDestination[] };
+  return body.data ?? [];
+}
+
 // Flattens nested objects/arrays into dot-notation string values, mirroring
 // the Python script's CSV flattening so column names line up the same way.
 export function flattenTripRow(obj: OtaTripRow, prefix = ""): Record<string, string> {

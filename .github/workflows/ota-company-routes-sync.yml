@@ -1,0 +1,42 @@
+name: OTA company routes sync
+
+# Keeps the company's departure-terminal / destination-route network mirror
+# current — triggers POST /api/ota/company-routes/sync on the deployed app
+# once a day. Terminal/route assignments change rarely (unlike sales trips),
+# so a daily cadence is plenty; this workflow's only job is to knock on the
+# door on a schedule and surface failures in the Actions tab.
+#
+# Required repo configuration (Settings -> Secrets and variables -> Actions):
+#   Variables: OTA_COMPANY_ROUTES_SYNC_URL -> e.g. https://orodashboard.onrender.com/api/ota/company-routes/sync
+#   Secrets:   OTA_SYNC_TOKEN              -> must match OTA_SYNC_TOKEN in the app's env
+
+on:
+  schedule:
+    - cron: "30 3 * * *" # once daily, off-peak
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger company routes sync
+        run: |
+          if [ -z "${{ vars.OTA_COMPANY_ROUTES_SYNC_URL }}" ] || [ -z "${{ secrets.OTA_SYNC_TOKEN }}" ]; then
+            echo "OTA_COMPANY_ROUTES_SYNC_URL (repo variable) and/or OTA_SYNC_TOKEN (repo secret) are not set." >&2
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time 300 \
+            -X POST "${{ vars.OTA_COMPANY_ROUTES_SYNC_URL }}" \
+            -H "x-sync-token: ${{ secrets.OTA_SYNC_TOKEN }}") || true
+
+          echo "HTTP status: $http_status"
+          cat response.json 2>/dev/null
+          echo
+
+          if [ -z "$http_status" ] || [ "$http_status" -ge 400 ]; then
+            echo "Company routes sync request failed." >&2
+            exit 1
+          fi

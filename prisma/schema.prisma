@@ -1030,6 +1030,7 @@ enum OtaSyncEntity {
   EMPLOYEES
   TERMINALS
   VEHICLES
+  COMPANY_ROUTES
 }
 
 model OtaSyncLog {
@@ -1153,4 +1154,34 @@ model OtaVehicle {
   @@index([departureTerminalName])
   @@index([arrivalTerminalName])
   @@map("ota_vehicles")
+}
+
+// One row per registered route (departure terminal -> destination, with
+// distance) among the company's own assigned departure terminals — synced
+// from OTA's per-terminal /destinations endpoint, scoped down to just our
+// terminals by cross-referencing OtaTerminal.companyNames (already mirrors
+// OTA's own per-terminal company roster). Deliberately NOT linked by FK to
+// the operational Station/Terminal models — this is OTA's own route-network
+// registry, a different concept from our Station (HR/ops) and Terminal
+// (deposit-reconciliation) models, which may not have a 1:1 record for
+// every OTA-assigned terminal yet.
+model OtaCompanyRoute {
+  // OTA's own terminal_destination id, used directly as our primary key.
+  id                     String   @id
+
+  departureTerminalId    String
+  departureTerminalName  String
+  arrivalTerminalId      String
+  arrivalTerminalName    String
+
+  distanceKm             Decimal  @db.Decimal(8, 2)
+  roadType               String?
+
+  raw                    Json
+
+  firstSeenAt            DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([departureTerminalId])
+  @@map("ota_company_routes")
 }

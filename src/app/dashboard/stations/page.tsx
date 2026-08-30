@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   MapPin, Plus, Pencil, Trash2, X, Check, ChevronRight,
   Users, Monitor, Navigation, Building2, Search, AlertCircle,
-  Loader2, Layers, UserPlus, ShieldCheck,
+  Loader2, Layers, UserPlus, ShieldCheck, Route, CheckCircle2,
 } from "lucide-react";
 
 // ─── Types — mirror the API response shape ────────────────────────────────────
@@ -877,6 +877,81 @@ function DetailPanel({ station, allStations, onEdit, onDelete, onReload }: {
   );
 }
 
+// ─── Our 16 OTA-assigned departure terminals ──────────────────────────────────
+// Self-contained and read-only — deliberately doesn't touch the station
+// list/detail state above. OTA-assigned terminals with no matching Station
+// yet (name-normalized match, done server-side) show "Not set up yet"
+// instead of silently being skipped, so the gap is visible rather than
+// hidden. Auto-updates whenever the OTA route-network sync runs (daily, or
+// "Sync now" on the Terminals page) — nothing to maintain here manually.
+
+type OtaDepartureTerminal = {
+  id: string;
+  name: string;
+  station: { id: string; name: string; code: string } | null;
+  destinationCount: number;
+  totalDistanceKm: number;
+};
+
+function DepartureTerminalsPanel({ onSelectStation }: { onSelectStation: (stationId: string) => void }) {
+  const [terminals, setTerminals] = useState<OtaDepartureTerminal[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ terminals: OtaDepartureTerminal[] }>("/api/ota/company-routes")
+      .then((res) => { if (!cancelled) setTerminals(res.terminals); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load."); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (error) return null; // quietly stays hidden rather than breaking the page — this panel is supplementary
+  if (!terminals) {
+    return (
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px", marginBottom: 18, display: "flex", alignItems: "center", gap: 8, color: "var(--muted-foreground)", fontSize: 13 }}>
+        <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Loading your OTA-assigned departure terminals…
+      </div>
+    );
+  }
+
+  const operational = terminals.filter((t) => t.station).length;
+
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px", marginBottom: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Route size={15} color="var(--primary)" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--foreground)" }}>Your {terminals.length} OTA-assigned departure terminals</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--muted-foreground)" }}>
+          <span>{operational}/{terminals.length} set up as a station</span>
+          <a href="/dashboard/terminals" style={{ color: "var(--primary)", fontWeight: 600, textDecoration: "none" }}>See full route network →</a>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {terminals.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => t.station && onSelectStation(t.station.id)}
+            title={t.station ? `${t.destinationCount} destinations, ${t.totalDistanceKm.toFixed(0)} km total` : `Not yet set up as a station — ${t.destinationCount} OTA-registered destinations`}
+            style={{
+              display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 999,
+              border: `1.5px solid ${t.station ? "var(--border)" : "color-mix(in srgb, #d97706 45%, var(--border))"}`,
+              background: t.station ? "var(--background)" : "#fef3c7",
+              cursor: t.station ? "pointer" : "default", fontSize: 12.5, fontWeight: 600,
+              color: t.station ? "var(--foreground)" : "#92400e",
+            }}
+          >
+            {t.station ? <CheckCircle2 size={12} color="#16a34a" /> : <AlertCircle size={12} color="#d97706" />}
+            {t.name}
+            <span style={{ fontSize: 10.5, fontWeight: 700, opacity: 0.75 }}>{t.destinationCount}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function StationsPage() {
@@ -1011,6 +1086,8 @@ export default function StationsPage() {
               </div>
             ))}
           </div>
+
+          <DepartureTerminalsPanel onSelectStation={(stationId) => setSelected(stationId)} />
         </div>
 
         {/* Split pane */}

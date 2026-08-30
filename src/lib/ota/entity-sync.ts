@@ -13,10 +13,13 @@ import { prisma } from "@/lib/prisma";
 import { Prisma, type $Enums } from "@/generated/prisma/client";
 import {
   otaConfigFromEnv,
+  otaLogin,
   OtaRateLimitError,
   fetchAllOtaCompanyUsers,
   fetchAllOtaTerminals,
   fetchAllOtaVehicles,
+  fetchOtaCompanyProfile,
+  fetchTerminalDestinations,
   createOtaCompanyUser,
   type OtaConfig,
   type OtaCompanyUser,
@@ -307,4 +310,126 @@ export async function runOtaVehicleSync(options: RunOtaSyncOptions): Promise<Ota
       await prisma.otaVehicle.upsert({ where: { id }, create: { id, ...data }, update: data } as Prisma.OtaVehicleUpsertArgs);
     },
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPANY ROUTES — the departure terminals actually assigned to this
+// company, and every registered destination/distance from each. Doesn't fit
+// runOtaEntitySync's shape (one paginated fetchAll): this fans out into one
+// /destinations call per one of our own terminals instead, so it's a small
+// bespoke sync following the same staleness/rate-limit/log conventions.
+// "Our" terminals are read from the OtaTerminal mirror (already kept fresh
+// by runOtaTerminalSync) rather than re-deriving nationwide terminal data
+// here — run that sync first if OtaTerminal is empty/stale.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function mapRouteRow(terminalId: string, terminalName: string, d: Awaited<ReturnType<typeof fetchTerminalDestinations>>[number]): Record<string, unknown> {
+  const roadType = d.road_type ?? (d.road_distances ? (Object.entries(d.road_distances).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0]?.[0] ?? null) : null);
+  return {
+    departureTerminalId: terminalId,
+    departureTerminalName: d.departureTerminal?.name ?? terminalName,
+    arrivalTerminalId: d.arrival_terminal_id,
+    arrivalTerminalName: d.arrivalTerminal?.name ?? "Unknown",
+    distanceKm: new Prisma.Decimal(d.distance ?? "0"),
+    roadType,
+    raw: d as unknown as Prisma.InputJsonValue,
+  };
+}
+
+export async function runCompanyRoutesSync(options: RunOtaSyncOptions): Promise<OtaSyncResult> {
+  const entity: $Enums.OtaSyncEntity = "COMPANY_ROUTES";
+  const startedAt = new Date();
+  const ourTotalBefore = await prisma.otaCompanyRoute.count();
+
+  const staleCutoff = new Date(startedAt.getTime() - STALE_RUN_MS);
+  const inProgress = await prisma.otaSyncLog.findFirst({
+    where: { entity, finishedAt: null, startedAt: { gt: staleCutoff } },
+    orderBy: { startedAt: "desc" },
+  });
+  if (inProgress) {
+    return skippedResult(entity, options, ourTotalBefore, `Sync ${inProgress.id} was already in progress (started ${inProgress.startedAt.toISOString()}).`);
+  }
+
+  const lastRateLimited = await prisma.otaSyncLog.findFirst({
+    where: { entity, rateLimitedUntil: { gt: startedAt } },
+    orderBy: { startedAt: "desc" },
+  });
+  if (lastRateLimited?.rateLimitedUntil) {
+    return skippedResult(entity, options, ourTotalBefore, `Still cooling down from a rate limit until ${lastRateLimited.rateLimitedUntil.toISOString()}.`);
+  }
+
+  const log = await prisma.otaSyncLog.create({
+    data: { entity, source: options.source, triggeredBy: options.triggeredBy ?? null, status: "SUCCESS" },
+  });
+
+  let rowsFetched = 0;
+  let rowsCreated = 0;
+  let rowsUpdated = 0;
+  let sourceTotal: number | null = null;
+  let rateLimitedUntil: Date | null = null;
+  let errorMessage: string | null = null;
+  let status: $Enums.SyncStatus = "SUCCESS";
+
+  try {
+    const config = otaConfigFromEnv();
+    options.onProgress?.({ type: "start" });
+    const { token } = await otaLogin(config);
+
+    const profile = await fetchOtaCompanyProfile(config, token, config.companyId);
+    const ourTerminals = await prisma.otaTerminal.findMany({
+      where: { companyNames: { contains: profile.name } },
+      select: { id: true, name: true },
+    });
+    sourceTotal = ourTerminals.length;
+
+    const seenIds = new Set<string>();
+    let terminalsDone = 0;
+    for (const terminal of ourTerminals) {
+      const destinations = await fetchTerminalDestinations(config, token, terminal.id);
+      rowsFetched += destinations.length;
+
+      for (const d of destinations) {
+        seenIds.add(d.id);
+        const existed = await prisma.otaCompanyRoute.findUnique({ where: { id: d.id }, select: { id: true } });
+        const data = mapRouteRow(terminal.id, terminal.name, d);
+        await prisma.otaCompanyRoute.upsert({ where: { id: d.id }, create: { id: d.id, ...data }, update: data } as Prisma.OtaCompanyRouteUpsertArgs);
+        if (existed) rowsUpdated++;
+        else rowsCreated++;
+      }
+
+      terminalsDone++;
+      options.onProgress?.({ type: "upserting", done: terminalsDone, total: ourTerminals.length });
+    }
+
+    // A route that's disappeared from every one of our terminals' current
+    // destination lists (reassigned away, deleted upstream) shouldn't keep
+    // showing in our own mirror as if it were still live.
+    if (ourTerminals.length > 0) {
+      await prisma.otaCompanyRoute.deleteMany({
+        where: { departureTerminalId: { in: ourTerminals.map((t) => t.id) }, id: { notIn: [...seenIds] } },
+      });
+    }
+
+    options.onProgress?.({ type: "done" });
+  } catch (error) {
+    if (error instanceof OtaRateLimitError) {
+      status = "RATE_LIMITED";
+      const bufferSeconds = 5 * 60;
+      rateLimitedUntil = new Date(Date.now() + (error.retryAfterSeconds + bufferSeconds) * 1000);
+      errorMessage = error.message;
+      options.onProgress?.({ type: "rate-limited", retryAfterSeconds: error.retryAfterSeconds });
+    } else {
+      status = rowsCreated > 0 || rowsUpdated > 0 ? "PARTIAL" : "FAILED";
+      errorMessage = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  const ourTotalAfter = await prisma.otaCompanyRoute.count();
+
+  await prisma.otaSyncLog.update({
+    where: { id: log.id },
+    data: { status, pagesFetched: sourceTotal ?? 0, rowsFetched, rowsCreated, rowsUpdated, sourceTotal, ourTotal: ourTotalAfter, rateLimitedUntil, errorMessage, finishedAt: new Date() },
+  });
+
+  return { logId: log.id, status, pagesFetched: sourceTotal ?? 0, rowsFetched, rowsCreated, rowsUpdated, sourceTotal, ourTotal: ourTotalAfter, rateLimitedUntil, errorMessage };
 }

@@ -8,11 +8,15 @@ import {
   AlertCircle,
   Loader2,
   MapPin,
-  ArrowRight,
-  Route,
   ArrowRightLeft,
+  Route,
   ArrowDownToLine,
+  Network,
+  RefreshCw,
+  Ruler,
+  CheckCircle2,
 } from "lucide-react";
+import RouteNetworkDiagram from "@/components/ota/RouteNetworkDiagram";
 
 // ─── Types matching GET /api/terminals ───────────────────────────────────────
 
@@ -40,12 +44,29 @@ type Terminal = {
   linkedStation: StationRef | null;
 };
 
+// ─── Types matching GET /api/ota/company-routes ──────────────────────────────
+
+type RouteDestination = { id: string; arrivalTerminalId: string; arrivalTerminalName: string; distanceKm: number; roadType: string | null };
+type CompanyRouteTerminal = {
+  id: string;
+  name: string;
+  station: { id: string; name: string; code: string } | null;
+  destinationCount: number;
+  totalDistanceKm: number;
+  destinations: RouteDestination[];
+};
+type CompanyRoutesResponse = {
+  terminals: CompanyRouteTerminal[];
+  totalRoutes: number;
+  lastSync: { finishedAt: string; status: string } | null;
+};
+
 // ─── API helper ───────────────────────────────────────────────────────────────
 
-async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" } });
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? `Request failed: ${res.status}`);
+  if (!res.ok) throw new Error(json?.message ?? json?.error ?? `Request failed: ${res.status}`);
   return json as T;
 }
 
@@ -80,9 +101,185 @@ function roadLabel(r: RoadType) {
   return r.charAt(0).toUpperCase() + r.slice(1);
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+function fmtKm(n: number) {
+  return `${n % 1 === 0 ? n : n.toFixed(1)} km`;
+}
 
-export default function TerminalsPage() {
+// ─── Route network tab (OTA-sourced, auto-synced) ────────────────────────────
+
+function RouteNetworkTab() {
+  const [data, setData] = useState<CompanyRoutesResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await apiFetch<CompanyRoutesResponse>("/api/ota/company-routes");
+      setData(res);
+      setError(null);
+      setSelectedId((prev) => prev ?? res.terminals.slice().sort((a, b) => b.destinationCount - a.destinationCount)[0]?.id ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load the route network.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const res = await apiFetch<{ status: string; rowsCreated: number; rowsUpdated: number }>("/api/ota/company-routes/sync", { method: "POST" });
+      setToast(res.status === "SUCCESS" || res.status === "PARTIAL" ? `Synced — ${res.rowsCreated} new, ${res.rowsUpdated} updated.` : `Sync ${res.status.toLowerCase()}.`);
+      await load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: 60, color: "var(--muted-foreground)", fontSize: 13 }}>
+        <Spinner /> Loading route network…
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#fee2e2", borderRadius: 10, color: "#b91c1c", fontSize: 13 }}>
+        <AlertCircle size={16} /> {error ?? "Couldn't load the route network."}
+      </div>
+    );
+  }
+
+  const terminals = [...data.terminals].sort((a, b) => b.destinationCount - a.destinationCount);
+  const selected = terminals.find((t) => t.id === selectedId) ?? terminals[0] ?? null;
+  const operationalCount = terminals.filter((t) => t.station).length;
+  const grandTotalKm = terminals.reduce((s, t) => s + t.totalDistanceKm, 0);
+
+  return (
+    <div>
+      {toast && (
+        <div style={{ position: "fixed", bottom: 28, right: 28, zIndex: 999, background: "#0f172a", color: "#fff", padding: "12px 20px", borderRadius: 12, fontSize: 13, fontWeight: 500, boxShadow: "0 8px 30px rgb(0 0 0 / 0.18)" }}>
+          {toast}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
+        <p style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: 0 }}>
+          {data.lastSync
+            ? `Last synced ${new Date(data.lastSync.finishedAt).toLocaleString("en-GB")} (${data.lastSync.status.toLowerCase()}) — auto-syncs daily.`
+            : "Never synced yet."}
+        </p>
+        <button
+          onClick={syncNow}
+          disabled={syncing}
+          style={{ height: 36, padding: "0 14px", borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--foreground)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+        >
+          {syncing ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={13} />}
+          {syncing ? "Syncing…" : "Sync now"}
+        </button>
+      </div>
+
+      <div className="grid-4" style={{ gap: 12, marginBottom: 24 }}>
+        {[
+          { label: "Departure terminals", value: terminals.length, icon: <Navigation size={16} />, color: "#1d4ed8", bg: "#dbeafe" },
+          { label: "Registered routes", value: data.totalRoutes, icon: <Route size={16} />, color: "#7c3aed", bg: "#ede9fe" },
+          { label: "Operational (staffed)", value: `${operationalCount}/${terminals.length}`, icon: <CheckCircle2 size={16} />, color: "#16a34a", bg: "#dcfce7" },
+          { label: "Total network distance", value: fmtKm(grandTotalKm), icon: <Ruler size={16} />, color: "#d97706", bg: "#fef3c7" },
+        ].map((c) => (
+          <div key={c.label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 9, background: c.bg, color: c.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{c.icon}</div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--foreground)", lineHeight: 1, fontFamily: "monospace" }}>{c.value}</div>
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{c.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Terminal picker */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+        {terminals.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSelectedId(t.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 999,
+              border: "1.5px solid", borderColor: selected?.id === t.id ? "var(--primary)" : "var(--border)",
+              background: selected?.id === t.id ? "var(--primary)" : "var(--surface)",
+              color: selected?.id === t.id ? "#fff" : "var(--foreground)",
+              fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            {t.name}
+            <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.8 }}>{t.destinationCount}</span>
+            {!t.station && (
+              <span title="Not yet set up as an operational station" style={{ width: 6, height: 6, borderRadius: "50%", background: selected?.id === t.id ? "#fff" : "#d97706" }} />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {selected && (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1fr)", gap: 20 }}>
+          {/* Visual mapping */}
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{selected.name}</h3>
+                {selected.station ? <Badge label="Operational" color="green" /> : <Badge label="Not yet staffed" color="amber" />}
+              </div>
+              <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{selected.destinationCount} routes · {fmtKm(selected.totalDistanceKm)} total</span>
+            </div>
+            <RouteNetworkDiagram terminalName={selected.name} destinations={selected.destinations} />
+          </div>
+
+          {/* Literal mapping */}
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", maxHeight: 560, overflowY: "auto" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px", gap: 10, padding: "12px 16px", background: "var(--background)", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em", position: "sticky", top: 0 }}>
+              <div>Destination</div>
+              <div style={{ textAlign: "right" }}>Distance</div>
+              <div>Road</div>
+            </div>
+            {[...selected.destinations].sort((a, b) => a.distanceKm - b.distanceKm).map((d) => (
+              <div key={d.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px", gap: 10, padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 13, alignItems: "center" }}>
+                <div style={{ color: "var(--foreground)", fontWeight: 500 }}>{d.arrivalTerminalName}</div>
+                <div style={{ textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "var(--foreground)" }}>{fmtKm(d.distanceKm)}</div>
+                <div>
+                  {d.roadType ? (
+                    <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 6px", borderRadius: 999, background: d.roadType === "gravel" ? "#fef3c7" : "#f1f5f9", color: d.roadType === "gravel" ? "#d97706" : "#475569" }}>
+                      {d.roadType}
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--muted-foreground)" }}>—</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Deposit terminals tab (existing content, unchanged) ─────────────────────
+
+function DepositTerminalsTab() {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
@@ -109,21 +306,11 @@ export default function TerminalsPage() {
   }, [terminals, search]);
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--background)", padding: "32px 36px" }}>
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        * { box-sizing: border-box; }
-      `}</style>
-
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28, flexWrap: "wrap", gap: 16 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>Terminals</h1>
-          <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "4px 0 0" }}>
-            {loading ? "Loading…" : `${terminals.length} terminal${terminals.length !== 1 ? "s" : ""} from GET /api/terminals`}
-          </p>
-        </div>
-
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 16 }}>
+        <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: 0 }}>
+          {loading ? "Loading…" : `${terminals.length} terminal${terminals.length !== 1 ? "s" : ""} — used for deposit reconciliation and cashier assignment.`}
+        </p>
         <div style={{ position: "relative", width: 320 }}>
           <Search size={14} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--muted-foreground)" }} />
           <input
@@ -140,7 +327,6 @@ export default function TerminalsPage() {
         </div>
       </div>
 
-      {/* Total stat cards */}
       <div className="grid-4" style={{ gap: 12, marginBottom: 24 }}>
         {[
           { label: "Total terminals", value: terminals.length, icon: <Navigation size={16} />, color: "#1d4ed8", bg: "#dbeafe" },
@@ -158,7 +344,6 @@ export default function TerminalsPage() {
         ))}
       </div>
 
-      {/* Error */}
       {error && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#fee2e2", borderRadius: 10, marginBottom: 20, color: "#b91c1c", fontSize: 13 }}>
           <AlertCircle size={16} />
@@ -166,14 +351,12 @@ export default function TerminalsPage() {
         </div>
       )}
 
-      {/* Loading */}
       {loading && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: 60, color: "var(--muted-foreground)", fontSize: 13 }}>
           <Spinner /> Loading terminals…
         </div>
       )}
 
-      {/* Empty */}
       {!loading && !error && filtered.length === 0 && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 0", color: "var(--muted-foreground)" }}>
           <Building2 size={44} style={{ marginBottom: 14, opacity: 0.3 }} />
@@ -183,7 +366,6 @@ export default function TerminalsPage() {
         </div>
       )}
 
-      {/* Table */}
       {!loading && filtered.length > 0 && (
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
           <div style={{ display: "grid", gridTemplateColumns: "36px 2fr 1.5fr 1fr 1fr 1fr 1fr 1fr", gap: 16, padding: "14px 20px", background: "var(--background)", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -266,6 +448,47 @@ export default function TerminalsPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function TerminalsPage() {
+  const [tab, setTab] = useState<"network" | "deposits">("network");
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--background)", padding: "32px 36px" }}>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        * { box-sizing: border-box; }
+      `}</style>
+
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>Terminals</h1>
+        <p style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "4px 0 0" }}>
+          Your route network (destinations + distances, synced from OTA) and the terminals used for deposit reconciliation.
+        </p>
+      </div>
+
+      <div style={{ display: "flex", gap: 2, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 3, marginBottom: 24, width: "fit-content" }}>
+        {([["network", "Route network", Network], ["deposits", "Deposit terminals", MapPin]] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 7, height: 36, padding: "0 16px", borderRadius: 7, border: "none",
+              background: tab === id ? "var(--primary)" : "transparent",
+              color: tab === id ? "#fff" : "var(--muted-foreground)",
+              fontSize: 13.5, fontWeight: tab === id ? 700 : 500, cursor: "pointer",
+            }}
+          >
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "network" ? <RouteNetworkTab /> : <DepositTerminalsTab />}
     </div>
   );
 }
