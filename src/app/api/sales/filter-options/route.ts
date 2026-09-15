@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api-auth";
 import { ok, serverError } from "@/lib/api-utils";
-import { getCanonicalDepartureTerminals } from "@/lib/telegram/reports";
+import { getCanonicalDepartureTerminals, buildNameResolver } from "@/lib/telegram/reports";
 
 /**
  * GET /api/sales/filter-options
@@ -60,7 +60,12 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
-    const departureTerminals = [...new Set([...departures.map((d) => d.departureTerminalName), ...canonicalTerminals])]
+    // Raw sales_trips spellings are resolved to their canonical (OTA route
+    // registry) spelling before de-duping, so a casing/whitespace drift
+    // between the two sync sources doesn't produce two near-identical
+    // dropdown entries for what's really one terminal.
+    const resolveDeparture = buildNameResolver(canonicalTerminals);
+    const departureTerminals = [...new Set([...departures.map((d) => resolveDeparture(d.departureTerminalName)), ...canonicalTerminals])]
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
 

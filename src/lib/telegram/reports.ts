@@ -66,6 +66,37 @@ export async function getCanonicalDepartureTerminals(): Promise<string[]> {
   return rows.map((r) => r.departureTerminalName);
 }
 
+// Every registered destination name across all 16 terminals — the same
+// canonicalization target for arrival/route names as getCanonicalDeparture
+// Terminals is for departures.
+export async function getCanonicalArrivalTerminals(): Promise<string[]> {
+  const rows = await prisma.otaCompanyRoute.findMany({
+    select: { arrivalTerminalName: true },
+    distinct: ["arrivalTerminalId"],
+  });
+  return rows.map((r) => r.arrivalTerminalName);
+}
+
+function normalizeName(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, "");
+}
+
+// sales_trips is synced from a different OTA endpoint than OtaCompanyRoute's
+// route registry, and the two have drifted in spelling before (casing,
+// stray whitespace) for the same physical terminal — without this, a report
+// that keys its per-station buckets by exact string equality would split
+// one terminal's real activity into two near-identical entries (the
+// canonical one backfilled at zero, the real numbers stranded under the
+// other spelling), which is exactly the "shows zero but there is sales" bug
+// this resolves. Only folds case/whitespace variants together — a name with
+// no normalized match falls through unchanged rather than being fuzzy-
+// matched to the nearest canonical name, so two genuinely different
+// terminals never get silently merged.
+export function buildNameResolver(canonicalNames: string[]): (raw: string) => string {
+  const byNorm = new Map(canonicalNames.map((n) => [normalizeName(n), n]));
+  return (raw: string) => byNorm.get(normalizeName(raw)) ?? raw;
+}
+
 // Telegram's sendMessage caps text at 4096 characters. A per-station or
 // per-mismatch list is normally nowhere near that, but nothing stops it from
 // growing (more stations added, an unusually bad day for deposits) — this
@@ -110,8 +141,17 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
   const totalTrips = aggregate._count._all;
 
   // Every one of the 16 departure terminals always appears, at zero if it
-  // had no activity — instead of silently dropping out of the list.
-  const amountByStation = new Map(byTerminal.map((t) => [t.departureTerminalName, toNumber(t._sum.totalServiceCharge ?? 0)]));
+  // had no activity — instead of silently dropping out of the list. Raw
+  // names are resolved to their canonical spelling first (summed rather
+  // than overwritten, in case two spelling variants both matched one
+  // terminal) so a sync-spelling drift folds into the right terminal
+  // instead of appearing as a separate, seemingly-zero entry.
+  const resolveDeparture = buildNameResolver(canonicalTerminals);
+  const amountByStation = new Map<string, number>();
+  for (const t of byTerminal) {
+    const name = resolveDeparture(t.departureTerminalName);
+    amountByStation.set(name, (amountByStation.get(name) ?? 0) + toNumber(t._sum.totalServiceCharge ?? 0));
+  }
   for (const name of canonicalTerminals) {
     if (!amountByStation.has(name)) amountByStation.set(name, 0);
   }
@@ -223,10 +263,16 @@ function mergeRouteInto(target: StationBucket, arrival: string, route: RouteBuck
 // more than one spelling in the raw sales_trips data) into a single bucket
 // for that station — used by the station-scoped text report and PDF so a
 // scoped recipient sees one clean total, not one block per spelling.
+// Looked up by normalized name (not exact key), since `names` comes from
+// getStationMatchNames' own raw sales_trips spellings while `stations` is
+// keyed by buildServiceChargeData's canonical spellings — an exact-match
+// lookup would silently return nothing for a scoped recipient the moment
+// those two diverge by so much as casing.
 export function mergeStationBuckets(names: string[], stations: Map<string, StationBucket>): StationBucket {
   const merged = emptyStationBucket();
+  const byNorm = new Map([...stations.entries()].map(([key, bucket]) => [normalizeName(key), bucket] as const));
   for (const name of names) {
-    const s = stations.get(name);
+    const s = stations.get(name) ?? byNorm.get(normalizeName(name));
     if (!s) continue;
     merged.revenue += s.revenue;
     merged.serviceCharge += s.serviceCharge;
@@ -320,14 +366,23 @@ export async function buildServiceChargeData(
 ): Promise<{ stations: Map<string, StationBucket>; grandRevenue: number; grandServiceCharge: number }> {
   const { from, to } = dayRange(date);
 
-  const [rows, canonicalTerminals] = await Promise.all([
+  const [rows, canonicalTerminals, canonicalArrivals] = await Promise.all([
     prisma.salesTrip.groupBy({
       by: ["departureTerminalName", "arrivalTerminalName", "employeeExternalId", "employeeName"],
       where: { date: { gte: from, lt: to }, employeeExternalId: { not: null } },
       _sum: { tariff: true, totalServiceCharge: true },
     }),
     getCanonicalDepartureTerminals(),
+    getCanonicalArrivalTerminals(),
   ]);
+
+  // Both sides resolved to their canonical (OTA route registry) spelling
+  // before bucketing, so a departure or arrival name that's drifted in the
+  // sales sync (casing, stray whitespace) folds into the same station/route
+  // it really belongs to instead of splitting into a second, near-identical
+  // entry that looks like missing/zero activity.
+  const resolveDeparture = buildNameResolver(canonicalTerminals);
+  const resolveArrival = buildNameResolver(canonicalArrivals);
 
   const stations = new Map<string, StationBucket>();
   for (const name of canonicalTerminals) stations.set(name, emptyStationBucket());
@@ -340,8 +395,11 @@ export async function buildServiceChargeData(
     const serviceCharge = toNumber(r._sum.totalServiceCharge ?? 0);
     if (revenue === 0 && serviceCharge === 0) continue;
 
-    const station = stations.get(r.departureTerminalName) ?? emptyStationBucket();
-    const route = station.routes.get(r.arrivalTerminalName) ?? { revenue: 0, serviceCharge: 0, ticketers: new Map<string, RouteTicketer>() };
+    const departureName = resolveDeparture(r.departureTerminalName);
+    const arrivalName = resolveArrival(r.arrivalTerminalName);
+
+    const station = stations.get(departureName) ?? emptyStationBucket();
+    const route = station.routes.get(arrivalName) ?? { revenue: 0, serviceCharge: 0, ticketers: new Map<string, RouteTicketer>() };
     const ticketerKey = r.employeeExternalId as string;
     const ticketer = route.ticketers.get(ticketerKey) ?? { name: r.employeeName ?? "Unknown", revenue: 0, serviceCharge: 0 };
 
@@ -350,10 +408,10 @@ export async function buildServiceChargeData(
     route.ticketers.set(ticketerKey, ticketer);
     route.revenue += revenue;
     route.serviceCharge += serviceCharge;
-    station.routes.set(r.arrivalTerminalName, route);
+    station.routes.set(arrivalName, route);
     station.revenue += revenue;
     station.serviceCharge += serviceCharge;
-    stations.set(r.departureTerminalName, station);
+    stations.set(departureName, station);
 
     grandRevenue += revenue;
     grandServiceCharge += serviceCharge;
@@ -466,13 +524,20 @@ export async function buildMonthlySalesReport(now: Date = new Date()): Promise<s
   const totalCollected = totalRevenue + totalServiceCharge;
 
   // Every one of the 16 departure terminals always appears, even with zero
-  // trips this month, instead of dropping out of the by-station list.
-  const statMap = new Map(
-    byStation.map((s) => [
-      s.departureTerminalName,
-      { name: s.departureTerminalName, trips: s._count._all, revenue: toNumber(s._sum.tariff ?? 0), svc: toNumber(s._sum.totalServiceCharge ?? 0) },
-    ])
-  );
+  // trips this month, instead of dropping out of the by-station list. Raw
+  // names are resolved to their canonical spelling first (summed, not
+  // overwritten) for the same reason as the daily report — a sync-spelling
+  // drift must fold into the right terminal, not look like a second one.
+  const resolveDeparture = buildNameResolver(canonicalTerminals);
+  const statMap = new Map<string, { name: string; trips: number; revenue: number; svc: number }>();
+  for (const s of byStation) {
+    const name = resolveDeparture(s.departureTerminalName);
+    const existing = statMap.get(name) ?? { name, trips: 0, revenue: 0, svc: 0 };
+    existing.trips += s._count._all;
+    existing.revenue += toNumber(s._sum.tariff ?? 0);
+    existing.svc += toNumber(s._sum.totalServiceCharge ?? 0);
+    statMap.set(name, existing);
+  }
   for (const name of canonicalTerminals) {
     if (!statMap.has(name)) statMap.set(name, { name, trips: 0, revenue: 0, svc: 0 });
   }
