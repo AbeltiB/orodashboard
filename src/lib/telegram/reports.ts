@@ -122,7 +122,7 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
   const { from, to } = dayRange(date);
   const label = fmtDateLabel(date);
 
-  const [aggregate, byTerminal, canonicalTerminals] = await Promise.all([
+  const [aggregate, byTerminal, canonicalTerminals, syncNote] = await Promise.all([
     prisma.salesTrip.aggregate({
       where: { date: { gte: from, lt: to } },
       _sum: { totalServiceCharge: true, passengers: true },
@@ -134,6 +134,7 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
       _sum: { totalServiceCharge: true },
     }),
     getCanonicalDepartureTerminals(),
+    buildSyncFreshnessNote(to),
   ]);
 
   const totalRevenue = toNumber(aggregate._sum.totalServiceCharge ?? 0);
@@ -157,7 +158,7 @@ export async function buildDailySalesReport(date: Date): Promise<string> {
   }
 
   const header = [
-    `<b>Daily Sales Summary — ${label}</b>`,
+    syncNote + `<b>Daily Sales Summary — ${label}</b>`,
     ``,
     `Trips: <b>${totalTrips.toLocaleString()}</b>`,
     `Passengers: <b>${totalPassengers.toLocaleString()}</b>`,
@@ -281,17 +282,21 @@ export function mergeStationBuckets(names: string[], stations: Map<string, Stati
   return merged;
 }
 
-// "Last successful sync was HH:MM" (or a staleness/missing-sync warning) —
-// shared by both the full and single-station service-charge reports.
-// Deliberately doesn't force a sync itself (that can take ~14 minutes and
-// this report is built inside runDueSchedules, which the polling cron
-// expects to answer in seconds — forcing a sync in here would just recreate
-// the exact curl-times-out-on-a-slow-response problem already hit and fixed
-// for the sales-sync cron). Instead it's transparent about freshness rather
-// than assuming it away, relying on the hourly sync cron having already
-// caught up several times over between the ~19:00 operational cutoff and a
-// 22:00 send time.
-async function buildSyncFreshnessNote(): Promise<string> {
+// "Last successful sync was HH:MM" (or a staleness/incompleteness warning)
+// — shared by every report. Deliberately doesn't force a sync itself (that
+// can take ~14 minutes and this report is built inside runDueSchedules,
+// which the polling cron expects to answer in seconds — forcing a sync in
+// here would just recreate the exact curl-times-out-on-a-slow-response
+// problem already hit and fixed for the sales-sync cron).
+//
+// `periodEnd`, when given, is checked against the sync's own data window
+// (windowTo) rather than just how many minutes old the sync is — a sync
+// that finished 5 minutes ago can still have walked OTA's table *before*
+// the reported day's last trips were entered on their side (confirmed
+// live: a "yesterday" report sent at 8:21am was short 58 trips that only
+// synced in at 8:42am). Minutes-since-last-sync can't see that gap; only
+// comparing windowTo to the period being reported can.
+async function buildSyncFreshnessNote(periodEnd?: Date): Promise<string> {
   const lastSync = await prisma.salesSyncLog.findFirst({
     // finishedAt is nullable (a run that's still in progress, or — rarely —
     // one whose final update never landed) and Postgres sorts NULLs first
@@ -299,14 +304,19 @@ async function buildSyncFreshnessNote(): Promise<string> {
     // row would masquerade as "the most recent sync" ahead of every real one.
     where: { status: "SUCCESS", finishedAt: { not: null } },
     orderBy: { finishedAt: "desc" },
-    select: { finishedAt: true },
+    select: { finishedAt: true, windowTo: true },
   });
-  const syncAgeMin = lastSync?.finishedAt ? Math.round((Date.now() - lastSync.finishedAt.getTime()) / 60000) : null;
-  if (syncAgeMin === null) return `⚠️ No completed sync on record — these numbers may be incomplete.\n\n`;
-  if (syncAgeMin > 90) {
-    return `⚠️ Last successful sync was ${fmtAddisTime(lastSync!.finishedAt!)} (${Math.floor(syncAgeMin / 60)}h ${syncAgeMin % 60}m ago) — today's numbers might not be fully caught up.\n\n`;
+  if (!lastSync?.finishedAt) return `⚠️ No completed sync on record — these numbers may be incomplete.\n\n`;
+
+  if (periodEnd && lastSync.windowTo < periodEnd) {
+    return `⚠️ Last sync only covered data up to ${fmtAddisTime(lastSync.windowTo)} — before this period closed, so these numbers are still incomplete and will grow on the next sync.\n\n`;
   }
-  return `✅ Synced as of ${fmtAddisTime(lastSync!.finishedAt!)} Addis time.\n\n`;
+
+  const syncAgeMin = Math.round((Date.now() - lastSync.finishedAt.getTime()) / 60000);
+  if (syncAgeMin > 90) {
+    return `⚠️ Last successful sync was ${fmtAddisTime(lastSync.finishedAt)} (${Math.floor(syncAgeMin / 60)}h ${syncAgeMin % 60}m ago) — numbers might not be fully caught up.\n\n`;
+  }
+  return `✅ Synced as of ${fmtAddisTime(lastSync.finishedAt)} Addis time.\n\n`;
 }
 
 function renderStationBlock(stationName: string, station: StationBucket): string {
@@ -439,7 +449,7 @@ export function sortStationEntries(entries: [string, StationBucket][]): [string,
 // instead of silently dropping out of the report.
 export async function buildServiceChargeBreakdownReport(date: Date): Promise<string[]> {
   const label = fmtDateLabel(date);
-  const syncNote = await buildSyncFreshnessNote();
+  const syncNote = await buildSyncFreshnessNote(dayRange(date).to);
   const titleLine = `<b>Daily Financial Report — ${label}</b>`;
 
   const { stations, grandRevenue, grandServiceCharge } = await buildServiceChargeData(date);
@@ -457,7 +467,7 @@ export async function buildServiceChargeBreakdownReport(date: Date): Promise<str
 // their own station's numbers, never anyone else's.
 export async function buildStationServiceChargeReport(date: Date, stationId: string, stationName: string): Promise<string[]> {
   const label = fmtDateLabel(date);
-  const syncNote = await buildSyncFreshnessNote();
+  const syncNote = await buildSyncFreshnessNote(dayRange(date).to);
   const titleLine = `<b>${stationName} — Daily Financial Report — ${label}</b>`;
 
   const matchNames = await getStationMatchNames(stationId);
@@ -497,7 +507,7 @@ export function resolvePreviousEthiopianMonthRange(now: Date = new Date()): { fr
 // service-charge sum alone — this one shows both correctly.
 export async function buildMonthlySalesReport(now: Date = new Date()): Promise<string[]> {
   const { from, to, label, gregorianRange } = resolvePreviousEthiopianMonthRange(now);
-  const syncNote = await buildSyncFreshnessNote();
+  const syncNote = await buildSyncFreshnessNote(to);
   const titleLine = `<b>Monthly Sales Summary — ${label}</b>\n<i>${gregorianRange}</i>`;
 
   const [aggregate, byStation, canonicalTerminals] = await Promise.all([
