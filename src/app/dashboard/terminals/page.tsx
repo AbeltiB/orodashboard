@@ -58,6 +58,7 @@ type CompanyRouteTerminal = {
   destinations: RouteDestination[];
 };
 type CompanyRoutesResponse = {
+  companyName: string;
   terminals: CompanyRouteTerminal[];
   totalRoutes: number;
   totalActiveRoutes: number;
@@ -200,7 +201,7 @@ function RouteNetworkTab() {
       <div className="grid-4" style={{ gap: 12, marginBottom: 24 }}>
         {[
           { label: "Departure terminals", value: terminals.length, icon: <Navigation size={16} />, color: "#1d4ed8", bg: "#dbeafe" },
-          { label: "Active / registered routes", value: `${data.totalActiveRoutes}/${data.totalRoutes}`, icon: <Route size={16} />, color: "#7c3aed", bg: "#ede9fe" },
+          { label: `${data.companyName} / all registered routes`, value: `${data.totalActiveRoutes}/${data.totalRoutes}`, icon: <Route size={16} />, color: "#7c3aed", bg: "#ede9fe" },
           { label: "Operational (staffed)", value: `${operationalCount}/${terminals.length}`, icon: <CheckCircle2 size={16} />, color: "#16a34a", bg: "#dcfce7" },
           { label: "Total network distance", value: fmtKm(grandTotalKm), icon: <Ruler size={16} />, color: "#d97706", bg: "#fef3c7" },
         ].map((c) => (
@@ -238,77 +239,95 @@ function RouteNetworkTab() {
       </div>
 
       {selected && (() => {
-        const activeDestinations = selected.destinations.filter((d) => d.isActive);
-        const registeredOnly = selected.destinations.filter((d) => !d.isActive);
-        const sortedTable = [...selected.destinations].sort((a, b) => (a.isActive === b.isActive ? a.distanceKm - b.distanceKm : a.isActive ? -1 : 1));
+        const company = data.companyName;
+        const ourRoutes = selected.destinations.filter((d) => d.isActive).sort((a, b) => a.distanceKm - b.distanceKm);
+        const otherRoutes = selected.destinations.filter((d) => !d.isActive).sort((a, b) => a.distanceKm - b.distanceKm);
         return (
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1fr)", gap: 20 }}>
-            {/* Visual mapping — active routes only, per the diagram's job of showing what's actually running */}
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
+            {/* Left: the company's own routes — mapped visually and literally */}
             <div>
               <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{selected.name}</h3>
+                    <Badge label={`${company} routes`} color="blue" />
                     {selected.station ? <Badge label="Operational" color="green" /> : <Badge label="Not yet staffed" color="amber" />}
                   </div>
-                  <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{activeDestinations.length} active · {fmtKm(selected.activeTotalDistanceKm)}</span>
+                  <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{ourRoutes.length} routes · {fmtKm(selected.activeTotalDistanceKm)}</span>
                 </div>
                 <p style={{ fontSize: 11.5, color: "var(--muted-foreground)", margin: "0 0 8px" }}>
-                  Routes with real ticket sales on file. {registeredOnly.length > 0 && `${registeredOnly.length} more are registered with OTA but haven't sold a ticket yet — see the panel below.`}
+                  {company} routes from this terminal — each has real {company} ticket sales on file.
                 </p>
-                <RouteNetworkDiagram terminalName={selected.name} destinations={activeDestinations} />
+                <RouteNetworkDiagram terminalName={selected.name} destinations={ourRoutes} companyName={company} />
               </div>
 
-              {registeredOnly.length > 0 && (
-                <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px 20px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
-                    <AlertCircle size={14} color="#d97706" />
-                    <h4 style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>
-                      Also registered — not active yet ({registeredOnly.length})
-                    </h4>
+              {ourRoutes.length > 0 && (
+                <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px 120px", gap: 10, padding: "12px 16px", background: "var(--background)", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <div>Destination</div>
+                    <div style={{ textAlign: "right" }}>Distance</div>
+                    <div>Road</div>
+                    <div>Operator</div>
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {registeredOnly.sort((a, b) => a.distanceKm - b.distanceKm).map((d) => (
-                      <span key={d.id} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, background: "var(--background)", border: "1px solid var(--border)", color: "var(--muted-foreground)" }}>
-                        {d.arrivalTerminalName} <span style={{ fontFamily: "monospace", fontWeight: 600 }}>{fmtKm(d.distanceKm)}</span>
-                      </span>
-                    ))}
-                  </div>
+                  {ourRoutes.map((d) => (
+                    <div key={d.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px 120px", gap: 10, padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 13, alignItems: "center" }}>
+                      <div style={{ color: "var(--foreground)", fontWeight: 500 }}>{d.arrivalTerminalName}</div>
+                      <div style={{ textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "var(--foreground)" }}>{fmtKm(d.distanceKm)}</div>
+                      <div><RoadTypePill roadType={d.roadType} /></div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: "#1d4ed8", minWidth: 0 }}>
+                        <CheckCircle2 size={13} color="#16a34a" style={{ flexShrink: 0 }} />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{company}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
 
-            {/* Literal mapping */}
-            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", maxHeight: 560, overflowY: "auto" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px 60px", gap: 10, padding: "12px 16px", background: "var(--background)", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em", position: "sticky", top: 0 }}>
-                <div>Destination</div>
-                <div style={{ textAlign: "right" }}>Distance</div>
-                <div>Road</div>
-                <div style={{ textAlign: "center" }}>Ours</div>
+            {/* Right: everything else registered at this terminal — listed only, not mapped */}
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", maxHeight: 720, overflowY: "auto" }}>
+              <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--surface)" }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>
+                  Not {company} routes ({otherRoutes.length})
+                </h4>
+                <p style={{ fontSize: 11.5, color: "var(--muted-foreground)", margin: "4px 0 0" }}>
+                  Registered with OTA at this terminal, but no {company} ticket sales on file.
+                </p>
               </div>
-              {sortedTable.map((d) => (
-                <div key={d.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px 60px", gap: 10, padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 13, alignItems: "center", opacity: d.isActive ? 1 : 0.65 }}>
-                  <div style={{ color: "var(--foreground)", fontWeight: 500 }}>{d.arrivalTerminalName}</div>
-                  <div style={{ textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "var(--foreground)" }}>{fmtKm(d.distanceKm)}</div>
-                  <div>
-                    {d.roadType ? (
-                      <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 6px", borderRadius: 999, background: d.roadType === "gravel" ? "#fef3c7" : "#f1f5f9", color: d.roadType === "gravel" ? "#d97706" : "#475569" }}>
-                        {d.roadType}
-                      </span>
-                    ) : (
-                      <span style={{ color: "var(--muted-foreground)" }}>—</span>
-                    )}
-                  </div>
-                  <div style={{ textAlign: "center" }}>
-                    {d.isActive ? <CheckCircle2 size={15} color="#16a34a" /> : <span style={{ color: "var(--muted-foreground)" }}>—</span>}
-                  </div>
+              {otherRoutes.length === 0 ? (
+                <div style={{ padding: "24px 16px", fontSize: 13, color: "var(--muted-foreground)", textAlign: "center" }}>
+                  Every registered route from this terminal is a {company} route.
                 </div>
-              ))}
+              ) : (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px", gap: 10, padding: "10px 16px", background: "var(--background)", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <div>Destination</div>
+                    <div style={{ textAlign: "right" }}>Distance</div>
+                    <div>Road</div>
+                  </div>
+                  {otherRoutes.map((d) => (
+                    <div key={d.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px", gap: 10, padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 13, alignItems: "center", color: "var(--muted-foreground)" }}>
+                      <div style={{ fontWeight: 500 }}>{d.arrivalTerminalName}</div>
+                      <div style={{ textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmtKm(d.distanceKm)}</div>
+                      <div><RoadTypePill roadType={d.roadType} /></div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </div>
         );
       })()}
     </div>
+  );
+}
+
+function RoadTypePill({ roadType }: { roadType: string | null }) {
+  if (!roadType) return <span style={{ color: "var(--muted-foreground)" }}>—</span>;
+  return (
+    <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 6px", borderRadius: 999, background: roadType === "gravel" ? "#fef3c7" : "#f1f5f9", color: roadType === "gravel" ? "#d97706" : "#475569" }}>
+      {roadType}
+    </span>
   );
 }
 
