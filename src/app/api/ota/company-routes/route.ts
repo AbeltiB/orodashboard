@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const [routes, stations, activeTrips, lastSync] = await Promise.all([
+    const [routes, stations, activeTrips, lastSync, companyNameConfig] = await Promise.all([
       prisma.otaCompanyRoute.findMany({ orderBy: [{ departureTerminalName: "asc" }, { arrivalTerminalName: "asc" }] }),
       prisma.station.findMany({ where: { isDeleted: false }, select: { id: true, name: true, code: true } }),
       prisma.salesTrip.groupBy({ by: ["departureTerminalName", "arrivalTerminalName"] }),
@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
         where: { entity: "COMPANY_ROUTES", status: { in: ["SUCCESS", "PARTIAL"] }, finishedAt: { not: null } },
         orderBy: { finishedAt: "desc" },
       }),
+      prisma.systemConfig.findUnique({ where: { key: "company_name" } }),
     ]);
 
     const stationByNormalizedName = new Map(stations.map((s) => [normalizeName(s.name), s]));
@@ -75,6 +76,9 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return ok({
+      // Label for "our" (sales-backed) routes in the UI — same company_name
+      // setting the PDF reports use, so a rename in Settings flows through.
+      companyName: companyNameConfig?.value?.trim() || "BS Tech Digital",
       terminals,
       totalRoutes: routes.length,
       totalActiveRoutes: routes.length ? terminals.reduce((s, t) => s + t.activeDestinationCount, 0) : 0,
