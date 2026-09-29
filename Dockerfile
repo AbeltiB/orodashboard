@@ -13,6 +13,10 @@ WORKDIR /app
 # ---- deps: install once, reused by the builder stage ----
 FROM base AS deps
 COPY package.json package-lock.json ./
+# `npm ci` runs the postinstall hook (`prisma generate`), which needs the
+# schema present — copied in ahead of the full source so this stage still
+# caches independently of unrelated source changes.
+COPY prisma ./prisma
 RUN npm ci
 
 # ---- builder: generate the Prisma client, apply migrations, build ----
