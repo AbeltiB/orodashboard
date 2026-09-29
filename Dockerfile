@@ -27,12 +27,18 @@ RUN npm ci --include=dev
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# `npm run build` runs `prisma migrate deploy && next build` — migrate
-# deploy needs a live DB connection at build time, same as this app's
-# existing build behavior.
+# Same steps as `npm run build` (prisma migrate deploy && next build), but
+# with --webpack: the @next/swc-linux-x64-gnu optional binary Turbopack
+# needs isn't present in this image even though Linux glibc x64 is a
+# supported Turbopack platform, so it falls back to WASM bindings, which
+# don't support Turbopack at all. --webpack is Next's own documented
+# escape hatch for exactly this ("Turbopack is not supported on this
+# platform... To build on this platform, use Webpack instead"). Scoped to
+# the Docker build only — package.json's own build script (used by local
+# dev/Render) is untouched.
 ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
-RUN npm run build
+RUN npx prisma migrate deploy && npx next build --webpack
 
 # ---- runner: minimal image, only the standalone server + static assets ----
 FROM base AS runner
