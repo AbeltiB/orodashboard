@@ -11,7 +11,7 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
-export default function RouteNetworkDiagram({ terminalName, destinations }: { terminalName: string; destinations: Destination[] }) {
+export default function RouteNetworkDiagram({ terminalName, destinations, companyName }: { terminalName: string; destinations: Destination[]; companyName: string }) {
   const size = 640;
   const center = size / 2;
   const n = destinations.length;
@@ -19,7 +19,7 @@ export default function RouteNetworkDiagram({ terminalName, destinations }: { te
   if (n === 0) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 260, color: "var(--muted-foreground)", fontSize: 13 }}>
-        No registered destinations for this terminal yet.
+        No {companyName} routes from this terminal yet.
       </div>
     );
   }
@@ -69,9 +69,20 @@ export default function RouteNetworkDiagram({ terminalName, destinations }: { te
         </g>
       ))}
       <circle cx={center} cy={center} r={44} fill="var(--primary)" />
-      <text x={center} y={center} fontSize={12.5} fontWeight={700} textAnchor="middle" dominantBaseline="middle" fill="#fff">
+      <text x={center} y={center - 6} fontSize={12.5} fontWeight={700} textAnchor="middle" dominantBaseline="middle" fill="#fff">
         {truncate(terminalName, 12)}
       </text>
+      <text x={center} y={center + 10} fontSize={8} fontWeight={600} textAnchor="middle" dominantBaseline="middle" fill="#fff" opacity={0.85}>
+        {truncate(companyName, 16)}
+      </text>
+      {/* Legend — every spoke drawn here is one of the company's own routes */}
+      <g>
+        <rect x={8} y={8} width={Math.min(260, 60 + companyName.length * 6.2)} height={22} rx={11} fill="var(--surface)" stroke="var(--primary)" strokeWidth={1} />
+        <circle cx={22} cy={19} r={5} fill="var(--surface)" stroke="var(--primary)" strokeWidth={1.5} />
+        <text x={33} y={19} fontSize={10} fontWeight={600} dominantBaseline="middle" fill="var(--foreground)">
+          {truncate(companyName, 34)} route
+        </text>
+      </g>
     </svg>
   );
 }
