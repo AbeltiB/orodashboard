@@ -52,6 +52,12 @@ RUN npx prisma migrate deploy && npx next build --webpack
 FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
+# Next's standalone server.js binds to process.env.HOSTNAME, and Docker
+# auto-sets HOSTNAME to the container ID — which isn't a bindable address,
+# so the server accepts no connections at all (confirmed live: "Ready in
+# 0ms" logged, then every curl to localhost/127.0.0.1/0.0.0.0 refused).
+# Overriding it here forces the real bind address.
+ENV HOSTNAME="0.0.0.0"
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
