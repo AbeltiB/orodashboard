@@ -5,8 +5,10 @@
 # musl/glibc mismatch that a mixed alpine/debian build would hit.
 
 FROM node:22-slim AS base
+# curl is needed at runtime too — Coolify's container healthcheck runs it
+# from inside the container to probe /api/health.
 RUN apt-get update -y \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends openssl ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
