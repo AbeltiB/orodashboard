@@ -27,6 +27,12 @@ RUN npm ci --include=dev
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# The Prisma client generates to src/generated/prisma/client (a top-level
+# src path per schema.prisma's custom `output`, not inside node_modules) —
+# it doesn't survive the deps stage's `COPY --from=deps .../node_modules`
+# above, and it's gitignored so the git checkout doesn't have it either.
+# Regenerate it here, now that the full source is present.
+RUN npx prisma generate
 # Same steps as `npm run build` (prisma migrate deploy && next build), but
 # with --webpack: the @next/swc-linux-x64-gnu optional binary Turbopack
 # needs isn't present in this image even though Linux glibc x64 is a
