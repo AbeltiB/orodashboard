@@ -17,7 +17,11 @@ COPY package.json package-lock.json ./
 # schema present — copied in ahead of the full source so this stage still
 # caches independently of unrelated source changes.
 COPY prisma ./prisma
-RUN npm ci
+# --include=dev overrides npm's default of skipping devDependencies when
+# NODE_ENV=production is set — Coolify injects the app's NODE_ENV env var
+# into the build too, and the build needs devDependencies (typescript,
+# @tailwindcss/postcss) to run `next build`.
+RUN npm ci --include=dev
 
 # ---- builder: generate the Prisma client, apply migrations, build ----
 FROM base AS builder
